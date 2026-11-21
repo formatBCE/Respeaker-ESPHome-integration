@@ -118,7 +118,7 @@ bool AIC3104::write_volume_() {
 }
 
 void AIC3104::set_output_gain(uint8_t gain_db) {
-  this->output_gain_ = std::min<uint8_t>(gain_db, 9);
+  this->output_gain_ = gain_db;
   this->output_gain_enabled_ = true;
   // Apply on the next loop, but not before the XVF3800 has set up the codec.
   const uint32_t now = millis();
@@ -127,8 +127,16 @@ void AIC3104::set_output_gain(uint8_t gain_db) {
 }
 
 void AIC3104::apply_output_gain_() {
-  static const uint8_t level_regs[] = {AIC3104_HPLOUT_LEVEL, AIC3104_HPLCOM_LEVEL, AIC3104_HPROUT_LEVEL,
-                                       AIC3104_HPRCOM_LEVEL, AIC3104_LEFT_LOP_LEVEL, AIC3104_RIGHT_LOP_LEVEL};
+  // The output level registers, with the level in dB that the XVF3800 firmware
+  // sets in each of them after it resets the codec. The two common-mode outputs
+  // (HPLCOM, HPRCOM) start at 0 dB.
+  static const struct {
+    uint8_t reg;
+    uint8_t firmware_db;
+  } level_regs[] = {
+      {AIC3104_HPLOUT_LEVEL, 3},     {AIC3104_HPLCOM_LEVEL, 0},      {AIC3104_HPROUT_LEVEL, 3},
+      {AIC3104_HPRCOM_LEVEL, 0},     {AIC3104_LEFT_LOP_LEVEL, 3},    {AIC3104_RIGHT_LOP_LEVEL, 3},
+  };
 
   if (!this->write_byte(AIC3104_PAGE_CTRL, 0x00)) {
     ESP_LOGW(TAG, "Failed to set page 0");
@@ -138,41 +146,25 @@ void AIC3104::apply_output_gain_() {
   // mute, drive and power bits and a read-only status bit, so keep them.
   // The write is skipped when the value is already right, so a normal
   // check only reads.
-  for (uint8_t reg : level_regs) {
+  for (const auto &level_reg : level_regs) {
     uint8_t old_value;
-    if (!this->read_byte(reg, &old_value)) {
-      ESP_LOGW(TAG, "Reading output level 0x%02X failed", reg);
+    if (!this->read_byte(level_reg.reg, &old_value)) {
+      ESP_LOGW(TAG, "Reading output level 0x%02X failed", level_reg.reg);
       continue;
     }
-    uint8_t new_value = (old_value & 0x0F) | (this->output_gain_ << 4);
+    const uint8_t level = std::min<uint8_t>(level_reg.firmware_db + this->output_gain_, 9);
+    uint8_t new_value = (old_value & 0x0F) | (level << 4);
     if (new_value == old_value) {
       continue;
     }
-    if (!this->write_byte(reg, new_value)) {
-      ESP_LOGW(TAG, "Writing output level 0x%02X failed", reg);
+    if (!this->write_byte(level_reg.reg, new_value)) {
+      ESP_LOGW(TAG, "Writing output level 0x%02X failed", level_reg.reg);
       continue;
     }
-    ESP_LOGI(TAG, "Output level 0x%02X: 0x%02X -> 0x%02X (+%u dB)", reg, old_value, new_value, this->output_gain_);
+    ESP_LOGI(TAG, "Output level 0x%02X: 0x%02X -> 0x%02X (%u dB, +%u dB gain)", level_reg.reg, old_value,
+             new_value, level, this->output_gain_);
   }
 }
-
-void AIC3104OutputGain::setup() {
-  float value = 0;  // 0 dB is the default, the same as without this entity
-  this->pref_ = this->make_entity_preference<float>();
-  if (!this->pref_.load(&value)) {
-    value = 0;
-  }
-  this->publish_state(value);
-  this->parent_->set_output_gain((uint8_t) value);
-}
-
-void AIC3104OutputGain::control(float value) {
-  this->publish_state(value);
-  this->pref_.save(&value);
-  this->parent_->set_output_gain((uint8_t) value);
-}
-
-void AIC3104OutputGain::dump_config() { LOG_NUMBER("", "AIC3104 Output Gain", this); }
 
 }  // namespace aic3104
 }  // namespace esphome

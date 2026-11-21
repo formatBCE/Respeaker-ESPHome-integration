@@ -461,23 +461,16 @@ applies the route and the two gains after the version read, and applies a change
 as soon as you set it. Home Assistant saves the route and both numbers and
 restores them at the next boot.
 
-### Output gain (optional)
+### Output gain
 
-The on-board amplifier distorts above about 2.5 to 3 W, so the packages do not
-raise the output level. If you use an external amplifier on the line out, you
-can add an **Output gain** number. It adds 0 to +9 dB in 1 dB steps to the
-output stage of the codec, on top of the media player volume. The default is
-0 dB. Without the entry below there is no entity and the codec is not changed.
+The **Output gain** number adds 0 to +6 dB to the analog outputs of the codec,
+in 1 dB steps, on top of the level that the XVF3800 firmware sets. At 0 dB the
+outputs stay as the firmware set them. The number is useful with an external
+amplifier on the line out, where the media player volume leaves too little level.
 
-```yaml
-number:
-  - platform: aic3104
-    name: "Output gain"
-```
-
-**Caution:** The gain is added after the media player volume. A high gain with
-the volume near 100 % clips. Raise it one step at a time. Do not use it on the
-internal speaker.
+**Caution:** The gain is added after the media player volume. The on-board
+amplifier distorts above about 2.5 to 3 W, and a high gain with the volume near
+100 % clips. Raise it one step at a time. Do not use it on the internal speaker.
 
 The XVF3800 resets the codec when it restarts, for example after a DSP firmware
 update. The component applies the gain 5 seconds after boot and checks it every
