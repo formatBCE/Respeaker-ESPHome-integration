@@ -470,7 +470,7 @@ amplifier on the line out, where the media player volume leaves too little level
 
 **Caution:** The gain is added after the media player volume. The on-board
 amplifier distorts above about 2.5 to 3 W, and a high gain with the volume near
-100 % clips. Raise it one step at a time. Do not use it on the internal speaker.
+100 % clips. Raise it one step at a time. Do not raise it with a speaker on the on-board amplifier.
 
 The XVF3800 resets the codec when it restarts, for example after a DSP firmware
 update. The component applies the gain 5 seconds after boot and checks it every
