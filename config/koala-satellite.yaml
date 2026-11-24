@@ -2,11 +2,6 @@
 
 packages:
   va_connected_wait_for_ble:
-    voice_assistant:
-      on_client_connected:
-        - wait_until:
-            not: ble.enabled
-        - delay: 2s
     wifi:
       on_disconnect:
         - ble.enable:

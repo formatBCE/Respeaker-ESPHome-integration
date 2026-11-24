@@ -13,14 +13,8 @@ substitutions:
 
 packages:
   respeaker_satellite: !include common/respeaker-satellite-base.yaml
-  # BLE and Wi-Fi share the radio. Disable BLE while Wi-Fi is up, and wait for
-  # that before the voice assistant starts.
+  # BLE and Wi-Fi share the radio. Disable BLE while Wi-Fi is up.
   va_connected_wait_for_ble:
-    voice_assistant:
-      on_client_connected:
-        - wait_until:
-            not: ble.enabled
-        - delay: 2s
     wifi:
       on_disconnect:
         - ble.enable:
