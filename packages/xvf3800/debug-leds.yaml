@@ -27,6 +27,23 @@
 # - LED_EFFECT changed: the chip's own effect engine took over the ring.
 # =============================================================================
 
+# The switches below keep their state across a reboot, so a boot can run with
+# a poll off. A switch restores before the pollers start, and a poller start
+# undoes a suspend. So apply the states again here, after the pollers started
+# (priority 600) and before the boot LED effects (priority 375).
+esphome:
+  on_boot:
+    - priority: 500
+      then:
+        - lambda: |-
+            id(respeaker).set_led_verify_each_write(id(debug_verify_each_write).state);
+            if (!id(debug_readback).state) id(debug_led_check_interval).stop_poller();
+            if (!id(debug_beam_poll).state) id(beam_direction).stop_poller();
+            if (!id(debug_mute_button_poll).state) id(mute_button).stop_poller();
+            ESP_LOGI("debug_leds", "Boot: verify each write %s, read-back %s, beam poll %s, mute button poll %s",
+                     ONOFF(id(debug_verify_each_write).state), ONOFF(id(debug_readback).state),
+                     ONOFF(id(debug_beam_poll).state), ONOFF(id(debug_mute_button_poll).state));
+
 interval:
   - interval: 1s
     id: debug_led_check_interval
@@ -57,20 +74,22 @@ switch:
   # still showed the frame before the last one: the chip applies it later.
   - platform: template
     name: "Debug LED Verify Every Write"
+    id: debug_verify_each_write
     icon: mdi:bug
     entity_category: config
     optimistic: true
-    restore_mode: ALWAYS_OFF
+    restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action:
       - lambda: id(respeaker).set_led_verify_each_write(true);
     turn_off_action:
       - lambda: id(respeaker).set_led_verify_each_write(false);
   - platform: template
     name: "Debug LED Read-back"
+    id: debug_readback
     icon: mdi:bug
     entity_category: config
     optimistic: true
-    restore_mode: ALWAYS_ON
+    restore_mode: RESTORE_DEFAULT_ON
     turn_on_action:
       - component.resume: debug_led_check_interval
     turn_off_action:
@@ -78,10 +97,11 @@ switch:
   # Off: no azimuth reads (10 Hz). Beam lock and the beam LED effect stop.
   - platform: template
     name: "Debug Beam Poll"
+    id: debug_beam_poll
     icon: mdi:bug
     entity_category: config
     optimistic: true
-    restore_mode: ALWAYS_ON
+    restore_mode: RESTORE_DEFAULT_ON
     turn_on_action:
       - component.resume: beam_direction
     turn_off_action:
@@ -90,10 +110,11 @@ switch:
   # factory reset hold and the Improv authorization do not.
   - platform: template
     name: "Debug Mute Button Poll"
+    id: debug_mute_button_poll
     icon: mdi:bug
     entity_category: config
     optimistic: true
-    restore_mode: ALWAYS_ON
+    restore_mode: RESTORE_DEFAULT_ON
     turn_on_action:
       - component.resume: mute_button
     turn_off_action:
