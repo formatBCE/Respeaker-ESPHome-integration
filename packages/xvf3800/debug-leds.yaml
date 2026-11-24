@@ -15,8 +15,9 @@
 # - Switches that stop the read-back and the two fast I2C polls, to see which
 #   traffic the flashes need.
 #
-# After boot, look for "LED check: read-back works" and "LED_EFFECT is N". If
-# they are missing, the chip does not answer the read, and the test is void.
+# Every minute the log shows "LED check: N read-backs, M mismatches,
+# LED_EFFECT E". If this line is missing, the chip does not answer the read,
+# and the test is void. LED_EFFECT -1 means the effect read gets no answer.
 #
 # Reading the result, with the ring off and idle:
 # - Flash, no MISMATCH: the chip holds the right (dark) frame, so the fault is

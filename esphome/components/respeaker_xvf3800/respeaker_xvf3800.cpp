@@ -638,11 +638,15 @@ void RespeakerXVF3800::verify_led_ring() {
     memcpy(&read[i], &ring_resp[1 + i * 4], sizeof(uint32_t));
     match &= (read[i] & 0xFFFFFF) == (this->last_led_frame_[i] & 0xFFFFFF);
   }
-  // Proves that the read-back works. Without this line, no MISMATCH means nothing.
-  static bool reported_working = false;
-  if (!reported_working) {
-    ESP_LOGI(TAG, "LED check: read-back works");
-    reported_working = true;
+  // A summary every 60 checks proves that the read-back works, also to a log
+  // viewer that connected after boot. Without it, no MISMATCH means nothing.
+  static uint32_t checks = 0;
+  static uint32_t mismatches = 0;
+  checks++;
+  mismatches += match ? 0 : 1;
+  if (checks % 60 == 0) {
+    ESP_LOGI(TAG, "LED check: %" PRIu32 " read-backs, %" PRIu32 " mismatches, LED_EFFECT %d", checks, mismatches,
+             this->led_effect_last_);
   }
   if (match) {
     ESP_LOGV(TAG, "LED check: ring matches the last frame");
