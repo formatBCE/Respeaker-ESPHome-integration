@@ -83,6 +83,34 @@ binaries, so it also proves that all URLs and the MD5 checksums are correct.
   and the 3D print files of one device (`lite`, `xvf3800`, `koala`).
 - `site/index.html` — the device list page at the root of the GitHub Pages site.
 
+## Voice Incubator firmware
+
+A second firmware makes each device a satellite of the Voice Incubator app (OHF-Voice/firmware-voice-incubator). The
+`voice_incubator` component replaces `voice_assistant` and `micro_wake_word`. The app keeps the wake words, the timers
+and the alarms. Its common files sit next to the main ones: `config/common/respeaker-satellite-incubator-base.yaml`,
+`respeaker-xvf-satellite-incubator-base.yaml`, `koala-incubator-base.yaml`. A user config selects it with that file in
+`files:`. The release workflow does not build it yet.
+
+The incubator common files keep `core/base.yaml`, the hardware packages and the device packages unchanged. The
+incubator packages replace the rest:
+
+- `incubator/voice.yaml` replaces `core/voice-assistant.yaml` and `core/timers-alarm.yaml`. It feeds the device
+  packages the state that they read: `voice_assistant_phase` (from the app's events), the `timer_ringing` switch, and
+  `first_active_timer` (of type `incubator_timer::Timer`, from the component `esphome/components/incubator_timer`).
+  `alarm_on` is an internal stub that stays off, because the device packages read and extend it.
+- `incubator/media-player.yaml` replaces `core/media-player.yaml`. `incubator/controls.yaml` is a copy of
+  `core/controls.yaml`; only the one-press action (`button_action`) differs.
+- `incubator/call-speaker.yaml` — the speaker of the app's speech. Include it after the hardware package: the resampler
+  copies its channel count from the mixer input, and that exists only after the mixer is validated.
+- `incubator/xvf3800.yaml` replaces `xvf3800/voice-assistant.yaml` and `xvf3800/timers-alarm.yaml`.
+- Speaker colors: the app sends the recognized speaker's color, and `voice.yaml` keeps it in `speaker_rgb`. Thinking
+  and replying show in it. `incubator/lite.yaml` and `incubator/xvf3800.yaml` extend those scripts of the device
+  packages. Koala's effects take the `voice_color_*` substitutions of `koala/device.yaml`, which
+  `koala-incubator-base.yaml` overrides.
+
+When you change `core/controls.yaml`, `core/media-player.yaml` or `core/voice-assistant.yaml`, port the change to the
+incubator copy.
+
 ## Important: the source of truth is GitHub, not the working tree
 
 `external_components` in `packages/respeaker-lite/hardware.yaml` and in `packages/xvf3800/base.yaml` pull the components

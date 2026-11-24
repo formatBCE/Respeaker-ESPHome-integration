@@ -22,6 +22,11 @@ substitutions:
   # "false" on the DevKitC: GPIO20 is a USB pin of the ESP32-S3, and noise on
   # it gives false presses.
   dial_button_mutes_speaker: "false"
+  # The color of the "Thinking" and "Replying" effects, 0 to 1 per channel. The
+  # Voice Incubator firmware sets the recognized speaker's color here.
+  voice_color_red: light_color.get_red()
+  voice_color_green: light_color.get_green()
+  voice_color_blue: light_color.get_blue()
 
 esphome:
   name: koala-satellite
@@ -145,7 +150,7 @@ light:
               brightness_decreasing = true;
             }
             auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255, light_color.get_blue() * 255);
+            Color color(${voice_color_red} * 255, ${voice_color_green} * 255, ${voice_color_blue} * 255);
             for (uint8_t i = 0; i < 43; i++) {
                 it[i] = color * uint8_t(255/brightness_step_number*(brightness_step_number-brightness_step));
             }
@@ -163,7 +168,7 @@ light:
           lambda: |-
             id(global_led_animation_index) = (43 + id(global_led_animation_index) - 1) % 43;
             auto light_color = id(led_ring).current_values;
-            Color color(light_color.get_red() * 255, light_color.get_green() * 255, light_color.get_blue() * 255);
+            Color color(${voice_color_red} * 255, ${voice_color_green} * 255, ${voice_color_blue} * 255);
             int step = 255/43;
             for (uint8_t i = 0; i < 43; i++) {
               it[i] = color * (255 - (((43 - id(global_led_animation_index) + i) % 43) * step));

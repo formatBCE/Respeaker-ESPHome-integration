@@ -1,0 +1,29 @@
+# =============================================================================
+# Voice Incubator — Respeaker Lite package
+#
+# Shows the thinking and replying states of packages/lite/device.yaml in the
+# color of the speaker that the app recognized. Include it after the device
+# package.
+# =============================================================================
+
+script:
+  # These lists add to the scripts of the device package, so they run after
+  # it: the effect keeps running, and only its color changes.
+  - id: !extend control_leds_voice_assistant_thinking_phase
+    then:
+      - script.execute: show_speaker_color
+  - id: !extend control_leds_voice_assistant_replying_phase
+    then:
+      - script.execute: show_speaker_color
+
+  - id: show_speaker_color
+    then:
+      - if:
+          condition:
+            lambda: return id(speaker_rgb) >= 0;
+          then:
+            - light.turn_on:
+                id: led_internal
+                red: !lambda return ((id(speaker_rgb) >> 16) & 0xFF) / 255.0f;
+                green: !lambda return ((id(speaker_rgb) >> 8) & 0xFF) / 255.0f;
+                blue: !lambda return (id(speaker_rgb) & 0xFF) / 255.0f;

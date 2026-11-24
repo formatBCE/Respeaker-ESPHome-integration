@@ -1,0 +1,24 @@
+# =============================================================================
+# Voice Incubator core — call speaker package
+#
+# The speaker that plays the app's speech: an input of the device's mixer
+# (mixing_speaker). Include this package after the hardware package. The
+# resampler copies its channel count from the mixer input, and the mixer sets
+# that only when it is validated, so the mixer must come first in the list.
+# =============================================================================
+
+speaker:
+  # The app's speech gets its own mixer input. The app sends 48 kHz once it
+  # chose output_sample_rate, so this resampler then passes it through. Older
+  # apps send 16 kHz: 64 taps and 48 filters keep the images at -69 dB.
+  - id: !extend mixing_speaker
+    source_speakers:
+      - id: call_mixing_input
+        timeout: never
+  - platform: resampler
+    id: call_speaker
+    output_speaker: call_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+    taps: 64
+    filters: 48
