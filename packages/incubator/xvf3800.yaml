@@ -1,17 +1,15 @@
 # =============================================================================
-# Voice Incubator — Respeaker XVF3800 device package
+# Voice Incubator — Respeaker XVF3800 package
 #
-# The incubator behavior on top of packages/xvf3800/base.yaml and
-# packages/xvf3800/hardware.yaml: the wake word gain, the volume range, the beam
-# lock, and the LED ring.
+# Replaces packages/xvf3800/voice-assistant.yaml and
+# packages/xvf3800/timers-alarm.yaml: the beam lock, the voice direction
+# sensor, the wake word gain, and the volume range and volume display of the
+# media player. packages/xvf3800/leds.yaml draws the ring as on main; the
+# interval of incubator/voice.yaml keeps the timer it shows current.
 #
 # The DSP sends the comms output (or the ASR beam, see "DSP route") on channel
 # 0 for the call, and the ASR beam on channel 1 for the wake word and the
 # second capture.
-#
-# The ring has no ESPHome light component. A 50 ms interval draws the core's
-# LED state (led_state) into one 12-entry array. The "LED Ring" light gives the
-# color and the brightness. A wake word shows as a beam toward the speaker.
 # =============================================================================
 
 substitutions:
@@ -19,52 +17,14 @@ substitutions:
   # The XVF3800 always used a gain of 1 on the ASR beam. "ASR output gain"
   # raises it in the DSP.
   wake_gain_factor: "1"
+  # The full volume range.
   volume_min: "0.0"
   volume_max: "1.0"
-  # Ring positions that turn red while the microphone is muted.
-  mic_mute_leds: "1, 4, 7, 10"
-
-esphome:
-  project:
-    name: formatbce.Respeaker XVF3800 Incubator
-    version: dev
-
-globals:
-  # The core's LED state, and when it started (led_show).
-  - id: led_state
-    type: std::string
-    restore_value: no
-    initial_value: '"Starting Offline"'
-  - id: led_state_ms
-    type: uint32_t
-    restore_value: no
-    initial_value: '0'
-  # The volume changed in the last 2 seconds: the ring shows it.
-  - id: volume_shown
-    type: bool
-    restore_value: no
-    initial_value: 'false'
-  # The "LED Ring" light's color and level. Its on_state is the only writer.
-  - id: user_led_ring_color_r
-    type: float
-    restore_value: yes
-    initial_value: '255.0'
-  - id: user_led_ring_color_g
-    type: float
-    restore_value: yes
-    initial_value: '0.0'
-  - id: user_led_ring_color_b
-    type: float
-    restore_value: yes
-    initial_value: '255.0'
-  - id: user_led_ring_brightness
-    type: float
-    restore_value: no
-    initial_value: '0.8'
 
 switch:
-  # Beam lock. When on, the beam stays on the direction of the wake word until
-  # the command is spoken (the app's "processing" event).
+  # Beam lock. When on, the XVF3800 beam is pinned to the wake-word direction
+  # until the command is spoken (the app's "processing" event). Off by default
+  # because fixed-beam mode is a behavioural change worth opting into deliberately.
   - platform: template
     id: beam_lock_enabled
     name: Beam lock
@@ -74,7 +34,9 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
 
 sensor:
-  # The direction of the wake word in degrees, published once per wake word.
+  # Voice Direction. The direction of the wake word in degrees, published once
+  # per wake word by wake_word_start_hook, never from the 10 Hz beam poll.
+  # force_update gives one state per wake word, also for an unchanged direction.
   - platform: template
     id: voice_direction
     name: Voice Direction
@@ -85,337 +47,54 @@ sensor:
     force_update: true
     update_interval: never
 
-# These lists add to the core triggers, so they run after the core actions.
+script:
+  # The voice package runs this hook after a wake word started a call.
+  - id: !extend wake_word_start_hook
+    then:
+      # Pin the AEC beam to the wake-word direction before any other sound
+      # source can steal it. Gated by the user-facing switch so the feature is
+      # opt-in.
+      - if:
+          condition:
+            switch.is_on: beam_lock_enabled
+          then:
+            - lambda: id(respeaker).lock_beam();
+      # One state per wake word, after the lock, so it is the locked direction.
+      - lambda: |-
+          const float degrees = id(respeaker).get_azimuth_degrees();
+          if (!std::isnan(degrees)) {
+            id(voice_direction).publish_state(degrees);
+          }
+
+# These lists add to the triggers of the voice package, so they run after it.
 voice_incubator:
-  on_call_start:
-    - if:
-        condition:
-          lambda: return wake_word != "follow_up" && wake_word != "manual";
-        then:
-          - if:
-              condition:
-                switch.is_on: beam_lock_enabled
-              then:
-                - lambda: id(respeaker).lock_beam();
-          # After the lock, so it is the locked direction.
-          - lambda: |-
-              const float degrees = id(respeaker).get_azimuth_degrees();
-              if (!std::isnan(degrees))
-                id(voice_direction).publish_state(degrees);
   on_event:
-    # The command ended: the stop word can hear the user from anywhere again.
+    # Release the beam as soon as the command is over, so the stop word can
+    # still hear the user from anywhere in the room during the answer.
     - if:
         condition:
           lambda: 'return event_type == "processing";'
         then:
           - lambda: id(respeaker).unlock_beam();
   on_call_end:
-    # Also when the call ended before "processing". Idempotent.
+    # Safety-net unlock: covers a call that ended before "processing".
+    # Idempotent.
     - lambda: id(respeaker).unlock_beam();
 
 media_player:
-  # The ring shows the volume however it changes.
+  # The volume display on the LED ring.
   - id: !extend external_media_player
-    on_volume:
-      - script.execute: show_volume
     on_mute:
-      - script.execute: show_volume
+      - delay: 100ms  # Debounce
+      - script.execute: control_leds_volume_changed
     on_unmute:
-      - script.execute: show_volume
-
-script:
-  - id: show_volume
-    mode: restart
-    then:
+      - delay: 100ms  # Debounce
+      - script.execute: control_leds_volume_changed
+    # A list, so it adds to sync_call_volume of the media player package.
+    on_volume:
       - if:
           condition:
-            lambda: return !id(init_in_progress);
+            - lambda: return !id(init_in_progress);
           then:
-            - lambda: id(volume_shown) = true;
-            - script.execute: control_leds
-            - delay: 2s
-            - lambda: id(volume_shown) = false;
-            - script.execute: control_leds
-
-  # Takes a core LED state, unless a failed DSP, a factory reset hold, or the
-  # volume wins. The interval below draws it.
-  - id: led_show
-    mode: restart
-    parameters:
-      state: string
-    then:
-      - lambda: |-
-          std::string s = state;
-          if (id(respeaker).is_failed()) {
-            s = "Failed";
-          } else if (id(factory_reset_phase) == 2) {
-            s = "Reset Confirmed";
-          } else if (id(factory_reset_phase) == 1) {
-            s = "Reset Coming Up";
-          } else if (id(volume_shown)) {
-            s = "Volume Display";
-          }
-          if (s != id(led_state)) {
-            id(led_state) = s;
-            id(led_state_ms) = millis();
-          }
-
-interval:
-  # Draws led_state. The driver drops an unchanged frame, so a steady ring
-  # costs one I2C write a second, the periodic re-send.
-  - interval: 50ms
-    id: led_animation_interval
-    then:
-      - lambda: |-
-          constexpr int N = 12;
-          constexpr int MUTE_LEDS[] = {${mic_mute_leds}};
-          const std::string &s = id(led_state);
-          const uint32_t now = millis();
-          const uint32_t t = now - id(led_state_ms);
-          const bool dim_night = id(night) && !id(timer_ringing);
-          const int user_rgb = int(id(user_led_ring_color_r)) << 16 |
-                               int(id(user_led_ring_color_g)) << 8 |
-                               int(id(user_led_ring_color_b));
-          const int ring_rgb = dim_night ? 0xFF4000 : user_rgb;
-          const int call_rgb = id(speaker_rgb) >= 0 && !id(night) ? id(speaker_rgb) : ring_rgb;
-          float level = dim_night ? 0.2f : std::max(id(user_led_ring_brightness), 0.2f);
-          if (s == "Answered Elsewhere") {
-            level = id(night) ? 0.2f : 0.25f;
-          } else if (s == "Failed" || s == "Reset Coming Up" || s == "Reset Confirmed") {
-            level = 1.0f;
-          }
-          uint32_t out[N] = {0};
-          // A color at a share of the level.
-          auto dim = [&](int rgb, float f) -> uint32_t {
-            f = clamp(f, 0.0f, 1.0f) * level;
-            return uint32_t(((rgb >> 16) & 0xFF) * f) << 16 |
-                   uint32_t(((rgb >> 8) & 0xFF) * f) << 8 |
-                   uint32_t((rgb & 0xFF) * f);
-          };
-          auto all = [&](int rgb, float f) {
-            for (int i = 0; i < N; i++) out[i] = dim(rgb, f);
-          };
-          auto pulse = [&](uint32_t period) {
-            return 0.5f - 0.5f * cosf(now * 6.2832f / period);
-          };
-          // Two heads with tails, opposite each other.
-          auto spin = [&](int rgb, int head, int dir, float f) {
-            for (int k = 0; k < 3; k++) {
-              const float tail = f * (1.0f - k / 3.0f);
-              out[((head - dir * k) % N + N) % N] = dim(rgb, tail);
-              out[((head + N / 2 - dir * k) % N + N) % N] = dim(rgb, tail);
-            }
-          };
-          // A glow toward the voice. The DSP's beam slot is off by 5 LEDs.
-          static float beam = 0.0f;
-          auto voice_beam = [&](int rgb, float f) {
-            if (!id(beam_direction).has_state())
-              return;
-            const float target = float(((int) id(beam_direction).state + 5) % N);
-            float diff = target - beam;
-            if (diff > N / 2.0f) diff -= N;
-            if (diff < -N / 2.0f) diff += N;
-            beam += diff * 0.2f;
-            if (beam >= N) beam -= N;
-            if (beam < 0.0f) beam += N;
-            for (int i = 0; i < N; i++) {
-              float d = fabsf(i - beam);
-              if (d > N / 2.0f) d = N - d;
-              const float g = 1.0f - d / 4.0f;
-              if (g > 0.0f) out[i] = dim(rgb, f * g);
-            }
-          };
-          auto muted_marks = [&]() {
-            if (id(mic_mute_switch).state)
-              for (int i : MUTE_LEDS) out[i] = (uint32_t) uint8_t(255.0f * std::max(level, 0.2f)) << 16;
-          };
-
-          if (s == "Improv") {
-            all(0xFFE3B5, pulse(2000));
-          } else if (s == "Starting") {
-            all(0x18BBF2, pulse(2000));
-          } else if (s == "Starting Offline") {
-            all(0xFFE3B5, 1.0f);
-          } else if (s == "Disconnected") {
-            all(0xFF0000, pulse(2000));
-          } else if (s == "Failed") {
-            all(0xC80000, 0.6f * pulse(2000));
-          } else if (s == "Reset Coming Up") {
-            all(0xFF6400, pulse(330));
-          } else if (s == "Reset Confirmed") {
-            all(0xFF0000, 1.0f);
-          } else if (s == "Heard") {
-            // Stands still and fades in until the app verified the wake word.
-            const float f = std::min(1.0f, t / 400.0f);
-            voice_beam(call_rgb, f * f);
-          } else if (s == "Listening For Command") {
-            voice_beam(call_rgb, 1.0f);
-          } else if (s == "Waiting for Command") {
-            spin(call_rgb, (now / 100) % N, 1, 1.0f);
-          } else if (s == "Thinking") {
-            spin(call_rgb, 0, 1, pulse(800));
-          } else if (s == "Replying") {
-            spin(call_rgb, N - 1 - (now / 80) % N, -1, 1.0f);
-          } else if (s == "Answered Elsewhere") {
-            all(call_rgb, 1.0f);
-          } else if (s == "Timer Ring") {
-            all(ring_rgb, pulse(400));
-            muted_marks();
-          } else if (s == "Timer Tick") {
-            // Each running timer in its color as far as it runs; the sooner
-            // ones lie on top. A dimmer LED steps through the soonest.
-            const float elapsed = id(timer_paused) ? 0.0f : (now - id(timer_received_ms)) / 1000.0f;
-            const int count = id(timer_count);
-            const float scale = std::max(id(timer_scale_s), 1.0f);
-            float ends[6];
-            float before = 0.0f;
-            for (int k = 0; k < count; k++) {
-              const float left = std::max(id(timer_lefts)[k] - elapsed, 0.0f);
-              ends[k] = std::min(std::max(N * left / scale, before + 1.0f), (float) N);
-              before = ends[k];
-            }
-            for (int k = count - 1; k >= 0; k--) {
-              const int rgb = id(night) || id(timer_colors)[k] < 0 ? ring_rgb : id(timer_colors)[k];
-              for (int i = 0; i < N && i < ends[k]; i++) {
-                const float f = std::min(ends[k] - i, 1.0f);
-                if (k == count - 1) {
-                  out[i] = dim(rgb, f);
-                } else if (f >= 0.5f) {
-                  out[i] = dim(rgb, 1.0f);
-                }
-              }
-            }
-            const int step = (now / 1000) % N;
-            if (count > 0 && !id(timer_paused) && step + 1 < ends[0]) {
-              const int rgb = id(night) || id(timer_colors)[0] < 0 ? ring_rgb : id(timer_colors)[0];
-              out[step] = dim(rgb, 0.9f);
-            }
-            muted_marks();
-          } else if (s == "Volume Display") {
-            const float volume = id(external_media_player).volume;
-            if (id(external_media_player).is_muted() || volume < 0.001f) {
-              out[0] = 0xFF0000;
-              out[N / 2] = 0xFF0000;
-            } else {
-              for (int i = 0; i < N; i++) out[i] = dim(user_rgb, N * volume - i);
-            }
-          } else if (s == "Intercom") {
-            all(ring_rgb, now % 1000 < 500 ? 1.0f : 0.0f);
-          } else if (s == "Result") {
-            float f;
-            if (id(result_ok)) {
-              f = t < 400 ? t / 400.0f : t < 1000 ? 1.0f - (t - 400) / 600.0f : 0.0f;
-            } else {
-              f = t < 150 || (t >= 300 && t < 450) ? 1.0f : 0.0f;
-            }
-            all(id(result_ok) ? 0x00FF40 : 0xFF0000, f);
-          } else if (s == "Recording") {
-            all(0xFF0000, now % 1000 < 500 ? 1.0f : 0.0f);
-          } else if (s == "Muted") {
-            if (id(led_ring_light).current_values.is_on() && !id(night))
-              all(user_rgb, 1.0f);
-            muted_marks();
-          } else if (s == "Idle") {
-            // The LED Ring light, if it is on. Dark at night.
-            if (id(led_ring_light).current_values.is_on() && !id(night))
-              all(user_rgb, 1.0f);
-          }
-          id(respeaker).set_led_ring(out);
-
-# The "rgb" light platform needs three float outputs. These are stubs on
-# purpose: the interval above draws the ring. The light's on_state reads
-# "remote_values", which keeps the color and the level apart.
-output:
-  - platform: template
-    id: led_ring_out_r
-    type: float
-    write_action:
-      - lambda: |-
-          // The interval draws the ring. This output is a stub.
-  - platform: template
-    id: led_ring_out_g
-    type: float
-    write_action:
-      - lambda: |-
-          // The interval draws the ring. This output is a stub.
-  - platform: template
-    id: led_ring_out_b
-    type: float
-    write_action:
-      - lambda: |-
-          // The interval draws the ring. This output is a stub.
-
-# The LED ring light. It is the one authority for the ring color and level:
-# its on_state is the only writer of user_led_ring_color_* and
-# user_led_ring_brightness. When it is on, the ring shows it when nothing
-# else is shown.
-light:
-  - platform: rgb
-    id: led_ring_light
-    name: "LED Ring"
-    icon: mdi:led-strip-variant
-    red: led_ring_out_r
-    green: led_ring_out_g
-    blue: led_ring_out_b
-    restore_mode: RESTORE_DEFAULT_OFF
-    default_transition_length: 0s
-    gamma_correct: 0
-    on_state:
-      - lambda: |-
-          auto v = id(led_ring_light).remote_values;
-          id(user_led_ring_color_r) = v.get_red() * 255.0f;
-          id(user_led_ring_color_g) = v.get_green() * 255.0f;
-          id(user_led_ring_color_b) = v.get_blue() * 255.0f;
-          // Keep the last level when the light goes off, so the other states
-          // do not go dark too.
-          if (v.is_on())
-            id(user_led_ring_brightness) = v.get_brightness();
-
-select:
-  - platform: template
-    name: "LED Ring Color Preset"
-    id: user_led_color_preset
-    icon: "mdi:palette"
-    entity_category: config
-    optimistic: true
-    restore_value: true
-    initial_option: "Custom"
-    options:
-      - "Purple"
-      - "Blue"
-      - "Green"
-      - "Yellow"
-      - "Cyan"
-      - "White"
-      - "Orange"
-      - "Pink"
-      - "Custom"
-    on_value:
-      # The light is the one authority for the color: push the preset into the
-      # light. "Custom" writes nothing, so the light keeps its restored color.
-      - lambda: |-
-          float r, g, b;
-          if (x == "Purple") {
-            r = 255.0f; g = 0.0f;   b = 255.0f;
-          } else if (x == "Blue") {
-            r = 0.0f;   g = 0.0f;   b = 255.0f;
-          } else if (x == "Green") {
-            r = 0.0f;   g = 255.0f; b = 0.0f;
-          } else if (x == "Yellow") {
-            r = 255.0f; g = 255.0f; b = 0.0f;
-          } else if (x == "Cyan") {
-            r = 0.0f;   g = 255.0f; b = 255.0f;
-          } else if (x == "White") {
-            r = 255.0f; g = 255.0f; b = 255.0f;
-          } else if (x == "Orange") {
-            r = 255.0f; g = 128.0f; b = 0.0f;
-          } else if (x == "Pink") {
-            r = 255.0f; g = 50.0f;  b = 200.0f;
-          } else {
-            return;
-          }
-          // make_call() and not light.turn_on: a call that does not set the
-          // state changes the color but keeps the light off.
-          auto call = id(led_ring_light).make_call();
-          call.set_rgb(r / 255.0f, g / 255.0f, b / 255.0f);
-          call.perform();
+            - delay: 100ms  # Debounce
+            - script.execute: control_leds_volume_changed

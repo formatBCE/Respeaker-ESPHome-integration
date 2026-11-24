@@ -1,18 +1,21 @@
 # =============================================================================
 # Respeaker XVF3800 voice satellite — all packages (Voice Incubator branch)
 #
-# On this branch the satellite is a Voice Incubator satellite: the
-# voice_incubator component replaces the Home Assistant voice pipeline. User
-# configurations select it with respeaker_lite_ref: voice_incubator. It holds
-# no credentials, so a remote import works without secrets.
+# On this branch the satellite is a Voice Incubator satellite. The incubator
+# packages replace the voice assistant, the timers and alarm, the media player
+# and the controls of the core. The device packages are the same as on main.
+# User configurations select it with respeaker_lite_ref: voice_incubator.
 #
-# The order is important: the core comes first, so a value in the XVF3800
-# packages wins. call-speaker.yaml comes after the hardware package.
+# The order is important: a later package overrides a value of an earlier one.
+# call-speaker.yaml comes after the hardware package.
 # =============================================================================
 
 packages:
-  incubator_core: !include ../../packages/incubator/core.yaml
+  core_base: !include ../../packages/core/base.yaml
+  incubator_voice: !include ../../packages/incubator/voice.yaml
+  incubator_media_player: !include ../../packages/incubator/media-player.yaml
   base: !include ../../packages/xvf3800/base.yaml
   hardware: !include ../../packages/xvf3800/hardware.yaml
   incubator_call_speaker: !include ../../packages/incubator/call-speaker.yaml
+  leds: !include ../../packages/xvf3800/leds.yaml
   incubator_xvf3800: !include ../../packages/incubator/xvf3800.yaml

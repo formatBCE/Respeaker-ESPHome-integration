@@ -85,19 +85,25 @@ binaries, so it also proves that all URLs and the MD5 checksums are correct.
 
 ## The voice_incubator branch
 
-On the `voice_incubator` branch, the three `config/common/*-base.yaml` files include `packages/incubator/` instead of
-`packages/core/`. The devices are then satellites of the Voice Incubator app (OHF-Voice/firmware-voice-incubator): the
-`voice_incubator` component replaces `voice_assistant` and `micro_wake_word`, and the app keeps the wake words and the
-timers. Users select it with `respeaker_lite_ref: voice_incubator`. `packages/core/` and the old device packages stay
-unchanged, so `main` merges into the branch without conflicts in them.
+On the `voice_incubator` branch, the devices are satellites of the Voice Incubator app (OHF-Voice/firmware-voice-incubator).
+The `voice_incubator` component replaces `voice_assistant` and `micro_wake_word`. The app keeps the wake words, the
+timers and the alarms. Users select it with `respeaker_lite_ref: voice_incubator`.
 
-- `incubator/core.yaml` — the board-independent part. `control_leds` picks one LED state, first match wins, and calls
-  the `led_show` script of the device with it. The header lists the IDs that a device must supply.
+The three `config/common/*-base.yaml` files keep `core/base.yaml`, the hardware packages, and the device packages of
+`main` unchanged. The incubator packages replace the rest:
+
+- `incubator/voice.yaml` replaces `core/voice-assistant.yaml` and `core/timers-alarm.yaml`. It feeds the device
+  packages the state that they read: `voice_assistant_phase` (from the app's events), the `timer_ringing` switch, and
+  `first_active_timer` (of type `incubator_timer::Timer`, from the component `esphome/components/incubator_timer`).
+  `alarm_on` is an internal stub that stays off, because the device packages read and extend it.
+- `incubator/media-player.yaml` replaces `core/media-player.yaml`. `incubator/controls.yaml` is a copy of
+  `core/controls.yaml`; only the one-press action (`button_action`) differs.
 - `incubator/call-speaker.yaml` — the speaker of the app's speech. Include it after the hardware package: the resampler
   copies its channel count from the mixer input, and that exists only after the mixer is validated.
-- `incubator/respeaker-lite.yaml` — mute and user button (press, factory reset hold) of Lite and Koala.
-- `incubator/lite.yaml`, `incubator/koala.yaml`, `incubator/xvf3800.yaml` — the devices. They draw each LED state.
-  XVF3800 reuses `xvf3800/base.yaml` and `xvf3800/hardware.yaml`, Lite and Koala reuse `respeaker-lite/hardware.yaml`.
+- `incubator/xvf3800.yaml` replaces `xvf3800/voice-assistant.yaml` and `xvf3800/timers-alarm.yaml`.
+
+When `main` changes `core/controls.yaml`, `core/media-player.yaml` or `core/voice-assistant.yaml`, port the change to
+the incubator copy by hand.
 
 ## Important: the source of truth is GitHub, not the working tree
 

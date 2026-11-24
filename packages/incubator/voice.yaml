@@ -1,0 +1,604 @@
+# =============================================================================
+# Voice Incubator — voice package
+#
+# Replaces packages/core/voice-assistant.yaml and packages/core/timers-alarm.yaml.
+# The device is a satellite of the Voice Incubator app
+# (https://github.com/OHF-Voice/app-voice-incubator): the voice_incubator
+# component of OHF-Voice/firmware-voice-incubator streams the calls to the app,
+# and runs the wake word models that the app pushes. The app also keeps the
+# timers and plays their ring. There is no alarm: the app does that too.
+#
+# The device packages of this repository stay as they are. This package feeds
+# them the state that they read from the core: the voice assistant phase, the
+# timer_ringing switch, and the first active timer. alarm_on is a stub that
+# stays off, because the device packages read and extend it.
+#
+# Phases: a call starts (waiting for command), the app hears the command
+# ("listening": listening for command), the command ended ("processing":
+# thinking), the answer is said ("responding": replying), the call ends (idle).
+# The app is not connected: not ready.
+# =============================================================================
+
+substitutions:
+  # On this branch the components, the sounds, and the XMOS firmware come from
+  # the branch itself.
+  respeaker_lite_ref: voice_incubator
+  # OHF-Voice/firmware-voice-incubator commit of the voice_incubator component:
+  # "Replies at 48 kHz (protocol 3)".
+  voice_incubator_ref: 3db3ccd39d57f738543708b3da06321cf48a836d
+  # What the device tells the app it is (HELLO "model").
+  incubator_model: respeaker
+  # Gain of channel 1 for the wake word models and for the second capture.
+  wake_gain_factor: "4"
+  # The speaker volume that the media player's 0-100% maps to. The app's
+  # speech follows it.
+  volume_min: "0.4"
+  volume_max: "0.85"
+  # The built-in sounds. Override one to use your own sound.
+  mute_switch_on_sound_file: https://raw.githubusercontent.com/formatBCE/Respeaker-ESPHome-integration/${satellite_core_ref}/sounds/mute_switch_on.opus
+  mute_switch_off_sound_file: https://raw.githubusercontent.com/formatBCE/Respeaker-ESPHome-integration/${satellite_core_ref}/sounds/mute_switch_off.opus
+  wake_word_triggered_sound_file: https://raw.githubusercontent.com/formatBCE/Respeaker-ESPHome-integration/${satellite_core_ref}/sounds/wake_word_triggered.opus
+  factory_reset_initiated_sound_file: https://raw.githubusercontent.com/formatBCE/Respeaker-ESPHome-integration/${satellite_core_ref}/sounds/factory_reset_initiated.opus
+  factory_reset_cancelled_sound_file: https://raw.githubusercontent.com/formatBCE/Respeaker-ESPHome-integration/${satellite_core_ref}/sounds/factory_reset_cancelled.opus
+  factory_reset_confirmed_sound_file: https://raw.githubusercontent.com/formatBCE/Respeaker-ESPHome-integration/${satellite_core_ref}/sounds/factory_reset_confirmed.opus
+
+esphome:
+  on_boot:
+    - priority: 375
+      then:
+        - sensor.template.publish:
+            id: next_timer
+            state: -1
+    # After voice_incubator's own setup, which sets its configured volume.
+    - priority: -100
+      then:
+        - script.execute: sync_call_volume
+        - lambda: |-
+            setenv("TZ", id(saved_time_zone).c_str(), 1);
+            tzset();
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/OHF-Voice/firmware-voice-incubator
+      ref: ${voice_incubator_ref}
+    components: [voice_incubator]
+    refresh: 0s
+  - source:
+      type: git
+      url: https://github.com/formatBCE/Respeaker-ESPHome-integration
+      ref: ${respeaker_lite_ref}
+    components: [incubator_timer]
+    refresh: 0s
+
+incubator_timer:
+
+# The app is the satellite's client, so Home Assistant's ESPHome connection is
+# optional: no reboot without it.
+api:
+  reboot_timeout: 0s
+  actions:
+    # The names of the voice assistant actions, so automations keep working.
+    - action: start_va
+      then:
+        - voice_incubator.start: manual
+    - action: stop_va
+      then:
+        - voice_incubator.cancel:
+    - action: start_call
+      then:
+        - voice_incubator.start: manual
+    - action: set_time_zone
+      variables:
+        posix_time_zone: string
+      then:
+        - lambda: |-
+            setenv("TZ", posix_time_zone.c_str(), 1);
+            tzset();
+            id(saved_time_zone) = posix_time_zone;
+            id(publish_current_time).execute();
+
+# The app finds the device here and opens its connection.
+mdns:
+  services:
+    - service: "_voice-incubator"
+      protocol: _tcp
+      port: 6055
+      txt:
+        mac: !lambda 'return get_mac_address();'
+        protocol: "2"
+
+globals:
+  - id: call_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # The call started with a wake word (not a button, not an answer).
+  - id: call_by_wake_word
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # The call's response is said: "stop" ends it (listen_for_stop).
+  - id: responding
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # An announcement (Home Assistant TTS) plays.
+  - id: announcing
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # The app says an announcement from another satellite.
+  - id: app_announcing
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # One of this satellite's own sounds plays (play_sound): an announcement that
+  # the app is not told about.
+  - id: playing_sound
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # The soonest timer, from the app's timer_progress events: what was left when
+  # the event came (counted down here since), of how long.
+  - id: timer_left_s
+    type: float
+    restore_value: no
+    initial_value: '0'
+  - id: timer_total_s
+    type: float
+    restore_value: no
+    initial_value: '1'
+  - id: timer_paused
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: timer_received_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: timer_shown
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # What the device packages read (core/timers-alarm.yaml on main).
+  - id: first_active_timer
+    type: incubator_timer::Timer
+    restore_value: no
+  - id: is_timer_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: saved_time_zone
+    type: std::string
+    restore_value: yes
+    initial_value: '"UTC0"'
+
+switch:
+  - platform: template
+    id: mute_sound
+    name: Mute-unmute sound
+    icon: "mdi:bullhorn"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: template
+    id: wake_sound
+    name: Wake sound
+    icon: "mdi:bullhorn"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+  # A timer rings. The app turns it on and off (timer_ringing, timer_stopped)
+  # and plays the ring. A button press turns it off and tells the app.
+  - platform: template
+    id: timer_ringing
+    optimistic: true
+    internal: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      - script.execute: listen_for_stop
+      - script.execute: duck_music
+      - script.execute: control_leds
+    on_turn_off:
+      - script.execute: listen_for_stop
+      - script.execute: duck_music
+      - script.execute: control_leds
+  # The app keeps the alarms. The device packages read and extend this switch,
+  # so it stays here, off.
+  - platform: template
+    id: alarm_on
+    optimistic: true
+    internal: true
+    restore_mode: ALWAYS_OFF
+
+sensor:
+  - platform: template
+    id: next_timer
+    name: "Next timer"
+    update_interval: never
+    disabled_by_default: true
+    device_class: duration
+    unit_of_measurement: s
+    icon: "mdi:timer"
+    accuracy_decimals: 0
+
+text_sensor:
+  - platform: template
+    name: "Current device time"
+    id: current_time
+    icon: mdi:clock
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    on_time:
+      - seconds: 0
+        then:
+          - script.execute: publish_current_time
+    on_time_sync:
+      - script.execute: publish_current_time
+
+interval:
+  # A running timer counts down here between the app's events.
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: return id(is_timer_active);
+          then:
+            - script.execute: fetch_first_active_timer
+            - lambda: |-
+                const int left = id(first_active_timer).seconds_left;
+                if (left % 5 == 0)
+                  id(next_timer).publish_state(left);
+
+audio_file:
+  - id: factory_reset_initiated_sound
+    file: ${factory_reset_initiated_sound_file}
+  - id: factory_reset_cancelled_sound
+    file: ${factory_reset_cancelled_sound_file}
+  - id: factory_reset_confirmed_sound
+    file: ${factory_reset_confirmed_sound_file}
+  - id: mute_switch_on_sound
+    file: ${mute_switch_on_sound_file}
+  - id: mute_switch_off_sound
+    file: ${mute_switch_off_sound_file}
+  - id: wake_word_triggered_sound
+    file: ${wake_word_triggered_sound_file}
+
+script:
+  # Runs after a wake word started a call. It does nothing here. A device
+  # package adds actions with "- id: !extend wake_word_start_hook".
+  - id: wake_word_start_hook
+    then: []
+
+  # Plays one of the sounds (an audio_file id) as an announcement. With
+  # priority, it stops the current announcement first; without, it does not
+  # play over one.
+  - id: play_sound
+    parameters:
+      priority: bool
+      sound_file: string
+    then:
+      - if:
+          condition:
+            lambda: return priority;
+          then:
+            - media_player.stop:
+                id: external_media_player
+                announcement: true
+      - lambda: |-
+          if (id(external_media_player).state != media_player::MediaPlayerState::MEDIA_PLAYER_STATE_ANNOUNCING || priority) {
+            id(playing_sound) = true;
+            id(external_media_player)
+              ->make_call()
+              .set_media_url("audio-file://" + sound_file)
+              .set_announcement(true)
+              .perform();
+          }
+
+  - id: stop_announcement
+    then:
+      - if:
+          condition:
+            media_player.is_announcing: external_media_player
+          then:
+            - media_player.stop:
+                id: external_media_player
+                announcement: true
+
+  # Sets the voice assistant phase and refreshes the LEDs.
+  - id: set_phase
+    parameters:
+      phase: int
+    then:
+      - lambda: id(voice_assistant_phase) = phase;
+      - script.execute: control_leds
+
+  # The phase between calls: listening while someone listens live or on the
+  # intercom, replying while the app says an announcement, else idle.
+  - id: set_idle_phase
+    then:
+      - script.execute:
+          id: set_phase
+          phase: !lambda |-
+            if (id(vc).is_monitoring()) return ${voice_assist_listening_for_command_phase_id};
+            if (id(app_announcing)) return ${voice_assist_replying_phase_id};
+            return ${voice_assist_idle_phase_id};
+
+  # The command went wrong: the error phase for a second.
+  - id: show_error
+    mode: restart
+    then:
+      - script.execute:
+          id: set_phase
+          phase: ${voice_assist_error_phase_id}
+      - delay: 1s
+      - if:
+          condition:
+            lambda: return !id(call_active);
+          then:
+            - script.execute: set_idle_phase
+
+  # "Stop", said alone, is listened for while a response is said and while a
+  # timer rings.
+  - id: listen_for_stop
+    then:
+      - if:
+          condition:
+            lambda: return id(responding) || id(timer_ringing).state;
+          then:
+            - voice_incubator.enable_stop_word:
+          else:
+            - voice_incubator.disable_stop_word:
+
+  # Music down while a call is open, a timer rings, something is announced, or
+  # the intercom is on. Back up when none is.
+  - id: duck_music
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return id(call_active) || id(timer_ringing).state || id(announcing) || id(playing_sound) || id(app_announcing) || id(vc).is_intercom();
+          then:
+            - mixer_speaker.apply_ducking:
+                id: media_mixing_input
+                decibel_reduction: 20
+                duration: 0s
+          else:
+            - mixer_speaker.apply_ducking:
+                id: media_mixing_input
+                decibel_reduction: 0
+                duration: 1s
+
+  # The app's speech at the media player's volume: the same range, and silent
+  # when the media player is muted or at zero.
+  - id: sync_call_volume
+    then:
+      - lambda: |-
+          const float volume = id(external_media_player).volume;
+          const bool silent = id(external_media_player).is_muted() || volume < 0.001f;
+          id(call_speaker).set_volume(silent ? 0.0f : remap<float, float>(volume, 0.0f, 1.0f, ${volume_min}, ${volume_max}));
+
+  # The soonest timer now (stored in first_active_timer).
+  - id: fetch_first_active_timer
+    then:
+      - lambda: |-
+          const float elapsed = id(timer_paused) ? 0.0f : (millis() - id(timer_received_ms)) / 1000.0f;
+          id(first_active_timer).seconds_left = (uint32_t) std::max(id(timer_left_s) - elapsed, 0.0f);
+          id(first_active_timer).total_seconds = (uint32_t) std::max(id(timer_total_s), 1.0f);
+
+  # If a timer runs (stored in is_timer_active).
+  - id: check_if_timers_active
+    then:
+      - lambda: id(is_timer_active) = id(timer_shown);
+
+  - id: send_wake_word_event
+    parameters:
+      wake_word: string
+    then:
+      - homeassistant.event:
+          event: esphome.wake_word_detected
+          data:
+            wake_word: !lambda return wake_word;
+  - id: send_stt_text_event
+    parameters:
+      stt_text: string
+    then:
+      - homeassistant.event:
+          event: esphome.stt_text
+          data:
+            text: !lambda return stt_text;
+
+  - id: publish_current_time
+    mode: single
+    then:
+      - lambda: |-
+          static std::string last_time_string = "";
+          auto time_now = id(homeassistant_time).now();
+          std::string current_time_string = time_now.strftime("%H:%M");
+          if (current_time_string != last_time_string) {
+            id(current_time).publish_state(current_time_string);
+            last_time_string = current_time_string;
+          }
+
+voice_incubator:
+  id: vc
+  model: ${incubator_model}
+  # Channel 0 is streamed for the call.
+  microphone:
+    microphone: i2s_mics
+    channels: 0
+  # Channel 1 runs the wake word models. This source starts and stops the
+  # microphone.
+  wake_microphone:
+    microphone: i2s_mics
+    channels: 1
+    gain_factor: ${wake_gain_factor}
+  # The same channel, recorded with the call: the app enrolls and identifies
+  # voices on it, and offers enrollment only with it.
+  aec_microphone:
+    microphone: i2s_mics
+    channels: 1
+    gain_factor: ${wake_gain_factor}
+  # Both channels leave the XMOS chip in the same I2S frame. Not measured.
+  aec_lead: 0ms
+  speaker: call_speaker
+  port: 6055
+  preroll: 1.5s
+  output_buffer: 1s
+  # The speaker's own rate: the app's replies play as the app made them.
+  output_sample_rate: 48000
+  call_timeout: 30s
+  volume: 70%
+  on_call_start:
+    - lambda: |-
+        id(call_active) = true;
+        id(call_by_wake_word) = wake_word != "follow_up" && wake_word != "manual";
+    - script.stop: show_error
+    - script.execute: duck_music
+    # Whatever was announced stops for the new call.
+    - script.execute: stop_announcement
+    - logger.log:
+        format: "Call started: %s"
+        args: [wake_word.c_str()]
+    - script.execute:
+        id: set_phase
+        phase: ${voice_assist_waiting_for_command_phase_id}
+    - if:
+        condition:
+          lambda: return id(call_by_wake_word);
+        then:
+          - script.execute:
+              id: send_wake_word_event
+              wake_word: !lambda return wake_word;
+          - if:
+              condition:
+                switch.is_on: wake_sound
+              then:
+                - script.execute:
+                    id: play_sound
+                    priority: false
+                    sound_file: "wake_word_triggered_sound"
+          # Device hook, empty here. The XVF3800 locks its beam.
+          - script.execute: wake_word_start_hook
+  on_call_end:
+    - lambda: |-
+        id(call_active) = false;
+        id(responding) = false;
+    - script.execute: listen_for_stop
+    - script.execute: duck_music
+    - logger.log:
+        format: "Call ended: %s"
+        args: [reason.c_str()]
+    # An error stays on for its second (show_error).
+    - if:
+        condition:
+          not:
+            script.is_running: show_error
+        then:
+          - script.execute: set_idle_phase
+  on_event:
+    - logger.log:
+        format: "Event %s: stage=%s"
+        args: [event_type.c_str(), 'event_data.get("stage").c_str()']
+    - lambda: |-
+        if (event_type == "timer_progress") {
+          id(timer_shown) = event_data.get_int("shown") != 0;
+          id(timer_left_s) = event_data.get_float("remaining");
+          id(timer_total_s) = event_data.get_float("total", 1.0f);
+          id(timer_paused) = event_data.get_int("paused") != 0;
+          id(timer_received_ms) = millis();
+          id(check_if_timers_active).execute();
+          if (id(is_timer_active)) {
+            id(fetch_first_active_timer).execute();
+            id(next_timer).publish_state(id(first_active_timer).seconds_left);
+          } else {
+            id(next_timer).publish_state(-1);
+          }
+          id(control_leds).execute();
+        } else if (event_type == "timer_ringing") {
+          id(timer_ringing).turn_on();
+        } else if (event_type == "timer_stopped") {
+          id(timer_ringing).turn_off();
+        } else if (event_type == "recognized") {
+          id(send_stt_text_event).execute(event_data.get("text"));
+        } else if (event_type == "responding") {
+          id(responding) = true;
+          id(listen_for_stop).execute();
+        } else if (event_type == "announcement") {
+          id(app_announcing) = event_data.get_bool("active");
+          id(duck_music).execute();
+        } else if (event_type == "monitoring") {
+          id(duck_music).execute();
+        }
+    # The call's phases.
+    - if:
+        condition:
+          lambda: 'return id(call_active) && event_type == "listening";'
+        then:
+          - script.execute:
+              id: set_phase
+              phase: ${voice_assist_listening_for_command_phase_id}
+    - if:
+        condition:
+          lambda: 'return id(call_active) && event_type == "processing";'
+        then:
+          - script.execute:
+              id: set_phase
+              phase: ${voice_assist_thinking_phase_id}
+    - if:
+        condition:
+          lambda: 'return id(call_active) && (event_type == "responding" || event_type == "enrolling" || event_type == "speaker_enrolled");'
+        then:
+          - script.execute:
+              id: set_phase
+              phase: ${voice_assist_replying_phase_id}
+    # Between calls: someone listens live, the intercom, another satellite's
+    # announcement.
+    - if:
+        condition:
+          lambda: 'return !id(call_active) && (event_type == "monitoring" || event_type == "announcement");'
+        then:
+          - script.execute: set_idle_phase
+    - if:
+        condition:
+          lambda: 'return event_type == "result" && !event_data.get_bool("ok");'
+        then:
+          - script.execute: show_error
+  # "Stop" said over the response: the call ends, and what it says is cut off.
+  on_stop_word:
+    - voice_incubator.cancel:
+    - script.execute: stop_announcement
+  # The app asked something back: the microphone opens again for the answer,
+  # with no wake word. Not while muted.
+  on_listen:
+    - if:
+        condition:
+          switch.is_off: mic_mute_switch
+        then:
+          - voice_incubator.start:
+              wake_word: follow_up
+              preroll: 0ms
+  on_connected:
+    # Detection starts on its own once the app has pushed a model.
+    - logger.log: "Voice Incubator connected"
+    # As the voice assistant did at its first connection.
+    - if:
+        condition:
+          - lambda: return id(init_in_progress);
+          - switch.is_on: mic_mute_switch
+        then:
+          - switch.turn_off: mic_mute_switch
+    - lambda: id(init_in_progress) = false;
+    - script.execute: set_idle_phase
+  on_disconnected:
+    - logger.log: "Voice Incubator disconnected"
+    - script.execute:
+        id: set_phase
+        phase: ${voice_assist_not_ready_phase_id}
+  on_model_loaded:
+    - logger.log:
+        format: "Wake word model loaded: %s"
+        args: [model_id.c_str()]
