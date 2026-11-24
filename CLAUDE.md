@@ -103,6 +103,10 @@ incubator packages replace the rest:
 - `incubator/call-speaker.yaml` — the speaker of the app's speech. Include it after the hardware package: the resampler
   copies its channel count from the mixer input, and that exists only after the mixer is validated.
 - `incubator/xvf3800.yaml` replaces `xvf3800/voice-assistant.yaml` and `xvf3800/timers-alarm.yaml`.
+- Speaker colors: the app sends the recognized speaker's color, and `voice.yaml` keeps it in `speaker_rgb`. Thinking
+  and replying show in it. `incubator/lite.yaml` and `incubator/xvf3800.yaml` extend those scripts of the device
+  packages. Koala's effects take the `voice_color_*` substitutions of `koala/device.yaml`, which
+  `koala-incubator-base.yaml` overrides.
 
 When you change `core/controls.yaml`, `core/media-player.yaml` or `core/voice-assistant.yaml`, port the change to the
 incubator copy.

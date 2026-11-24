@@ -15,6 +15,11 @@
 substitutions:
   # What the device tells the Voice Incubator app it is.
   incubator_model: koala
+  # The "Thinking" and "Replying" effects in the color of the speaker that the
+  # app recognized, else in the LED Ring color.
+  voice_color_red: "(id(speaker_rgb) >= 0 ? ((id(speaker_rgb) >> 16) & 0xFF) / 255.0f : light_color.get_red())"
+  voice_color_green: "(id(speaker_rgb) >= 0 ? ((id(speaker_rgb) >> 8) & 0xFF) / 255.0f : light_color.get_green())"
+  voice_color_blue: "(id(speaker_rgb) >= 0 ? (id(speaker_rgb) & 0xFF) / 255.0f : light_color.get_blue())"
 
 esphome:
   project:

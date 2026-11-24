@@ -112,6 +112,12 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  # 0xRRGGBB of the speaker that the app recognized in this call; -1 = none.
+  # The device packages show the voice states in this color.
+  - id: speaker_rgb
+    type: int
+    restore_value: no
+    initial_value: '-1'
   # The call started with a wake word (not a button, not an answer).
   - id: call_by_wake_word
     type: bool
@@ -454,6 +460,7 @@ voice_incubator:
   on_call_start:
     - lambda: |-
         id(call_active) = true;
+        id(speaker_rgb) = -1;
         id(call_by_wake_word) = wake_word != "follow_up" && wake_word != "manual";
     - script.stop: show_error
     - script.execute: duck_music
@@ -486,6 +493,7 @@ voice_incubator:
     - lambda: |-
         id(call_active) = false;
         id(responding) = false;
+        id(speaker_rgb) = -1;
     - script.execute: listen_for_stop
     - script.execute: duck_music
     - logger.log:
@@ -503,6 +511,16 @@ voice_incubator:
         format: "Event %s: stage=%s"
         args: [event_type.c_str(), 'event_data.get("stage").c_str()']
     - lambda: |-
+        // processing, enrolling and speaker_enrolled carry the speaker's
+        // color as r, g, b. Read before the phase changes below, so the new
+        // phase shows in it.
+        if (event_data.has("r")) {
+          id(speaker_rgb) = (event_data.get_int("r") & 0xFF) << 16 |
+                            (event_data.get_int("g") & 0xFF) << 8 |
+                            (event_data.get_int("b") & 0xFF);
+        } else if (event_type == "processing") {
+          id(speaker_rgb) = -1;  // Nobody recognized: the default color.
+        }
         if (event_type == "timer_progress") {
           id(timer_shown) = event_data.get_int("shown") != 0;
           id(timer_left_s) = event_data.get_float("remaining");

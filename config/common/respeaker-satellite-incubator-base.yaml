@@ -28,3 +28,4 @@ packages:
   respeaker_lite_hardware: !include ../../packages/respeaker-lite/hardware.yaml
   incubator_call_speaker: !include ../../packages/incubator/call-speaker.yaml
   lite_device: !include ../../packages/lite/device.yaml
+  incubator_lite: !include ../../packages/incubator/lite.yaml

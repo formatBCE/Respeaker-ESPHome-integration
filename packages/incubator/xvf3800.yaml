@@ -48,6 +48,26 @@ sensor:
     update_interval: never
 
 script:
+  # The thinking and replying states of packages/xvf3800/leds.yaml in the
+  # color of the speaker that the app recognized. These lists add to the
+  # scripts of leds.yaml, so they run after led_set_effect: the effect keeps
+  # running, and only its color changes.
+  - id: !extend control_leds_voice_assistant_thinking_phase
+    then:
+      - script.execute: show_speaker_color
+  - id: !extend control_leds_voice_assistant_replying_phase
+    then:
+      - script.execute: show_speaker_color
+  - id: show_speaker_color
+    then:
+      - lambda: |-
+          const int rgb = id(speaker_rgb);
+          if (rgb < 0)
+            return;
+          id(effect_color_r) = (rgb >> 16) & 0xFF;
+          id(effect_color_g) = (rgb >> 8) & 0xFF;
+          id(effect_color_b) = rgb & 0xFF;
+
   # The voice package runs this hook after a wake word started a call.
   - id: !extend wake_word_start_hook
     then:
@@ -69,6 +89,15 @@ script:
 # These lists add to the triggers of the voice package, so they run after it.
 voice_incubator:
   on_event:
+    # A speaker's color can come without a new phase (speaker_enrolled while
+    # replying). control_leds of leds.yaml repaints only on a new state, so
+    # ask for it.
+    - if:
+        condition:
+          lambda: return event_data.has("r");
+        then:
+          - lambda: id(led_force_update) = true;
+          - script.execute: control_leds
     # Release the beam as soon as the command is over, so the stop word can
     # still hear the user from anywhere in the room during the answer.
     - if:
