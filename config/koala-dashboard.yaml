@@ -6,7 +6,7 @@ substitutions:
   # Keep the name respeaker_lite_ref. The packages read it to select the
   # components, the firmware, and the sounds. Under another name, they use
   # their own default release.
-  respeaker_lite_ref: 2026.11.2
+  respeaker_lite_ref: 2026.11.3
 
 packages:
   koala:
