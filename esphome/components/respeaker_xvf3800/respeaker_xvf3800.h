@@ -277,6 +277,8 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   void set_led_ring(uint32_t *rgb_array);
   // Debug (issue #115): how often an unchanged frame is sent again.
   void set_led_refresh_ms(uint32_t ms) { this->led_refresh_ms_ = ms; }
+  // Debug (issue #115): read the ring back after every write, not once a second.
+  void set_led_verify_each_write(bool on) { this->led_verify_each_write_ = on; }
   // Debug (issue #115): reads LED_RING_COLOR and LED_EFFECT back from the chip
   // and logs a warning if the ring holds another frame than the last one sent.
   void verify_led_ring();
@@ -375,7 +377,15 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   uint32_t led_frame_sent_ms_{0};
   uint32_t led_refresh_ms_{1000};
   int led_effect_last_{-1};  // last LED_EFFECT read by verify_led_ring(), -1 = none
+  // Debug (issue #115): read-back state.
+  uint32_t prev_led_frame_[12]{};
+  bool led_verify_each_write_{false};
+  uint32_t led_checks_{0};
+  uint32_t led_mismatches_{0};
+  uint32_t led_stale_{0};
+  uint32_t led_check_summary_ms_{0};
   uint8_t led_ring_cmd_();
+  void check_led_frame_();
 
   // The chip resets these on power-up; they are (re)applied after boot.
   bool asr_route_{false};

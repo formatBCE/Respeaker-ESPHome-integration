@@ -590,8 +590,12 @@ void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
   // Cache only a frame that reached the chip, so a failed one is sent again.
   this->led_frame_valid_ = this->xmos_write_bytes(GPO_SERVICER_RESID, this->led_ring_cmd_(), payload, 48);
   if (this->led_frame_valid_) {
+    memcpy(this->prev_led_frame_, this->last_led_frame_, sizeof(this->prev_led_frame_));
     memcpy(this->last_led_frame_, rgb_array, sizeof(this->last_led_frame_));
     this->led_frame_sent_ms_ = now;
+    if (this->led_verify_each_write_) {
+      this->check_led_frame_();
+    }
   }
 }
 
@@ -614,6 +618,22 @@ void RespeakerXVF3800::verify_led_ring() {
     this->led_effect_last_ = effect_resp[1];
   }
 
+  // With the per-write check on, the ring is already checked after every write.
+  if (!this->led_verify_each_write_) {
+    this->check_led_frame_();
+  }
+
+  // A summary every minute proves that the read-back works, also to a log
+  // viewer that connected after boot. Without it, no MISMATCH means nothing.
+  const uint32_t now = millis();
+  if (now - this->led_check_summary_ms_ >= 60000) {
+    this->led_check_summary_ms_ = now;
+    ESP_LOGI(TAG, "LED check: %" PRIu32 " read-backs, %" PRIu32 " mismatches, %" PRIu32 " stale, LED_EFFECT %d",
+             this->led_checks_, this->led_mismatches_, this->led_stale_, this->led_effect_last_);
+  }
+}
+
+void RespeakerXVF3800::check_led_frame_() {
   // Nothing to compare with before the first frame that reached the chip.
   if (!this->led_frame_valid_) {
     return;
@@ -633,25 +653,25 @@ void RespeakerXVF3800::verify_led_ring() {
 
   // Compare the colour bytes only. Byte 3 of each entry is logged, not compared.
   bool match = true;
+  bool stale = true;  // the chip still holds the frame before the last one
   uint32_t read[12];
   for (int i = 0; i < 12; i++) {
     memcpy(&read[i], &ring_resp[1 + i * 4], sizeof(uint32_t));
     match &= (read[i] & 0xFFFFFF) == (this->last_led_frame_[i] & 0xFFFFFF);
+    stale &= (read[i] & 0xFFFFFF) == (this->prev_led_frame_[i] & 0xFFFFFF);
   }
-  // A summary every 60 checks proves that the read-back works, also to a log
-  // viewer that connected after boot. Without it, no MISMATCH means nothing.
-  static uint32_t checks = 0;
-  static uint32_t mismatches = 0;
-  checks++;
-  mismatches += match ? 0 : 1;
-  if (checks % 60 == 0) {
-    ESP_LOGI(TAG, "LED check: %" PRIu32 " read-backs, %" PRIu32 " mismatches, LED_EFFECT %d", checks, mismatches,
-             this->led_effect_last_);
-  }
+  this->led_checks_++;
   if (match) {
     ESP_LOGV(TAG, "LED check: ring matches the last frame");
     return;
   }
+  // The chip may apply a frame after it answers the write. Count that, but do
+  // not flood the log with it.
+  if (stale) {
+    this->led_stale_++;
+    return;
+  }
+  this->led_mismatches_++;
 
   char sent_hex[12 * 9 + 1];
   char read_hex[12 * 9 + 1];
