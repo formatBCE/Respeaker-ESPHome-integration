@@ -1,0 +1,85 @@
+# =============================================================================
+# Respeaker XVF3800 — LED ring debug package (issue #115). Not for daily use.
+#
+# Finds where the random LED colors come from. Add this file to "files:" after
+# config/common/respeaker-xvf-satellite-base.yaml (or the incubator base), and
+# set respeaker_lite_ref to the debug branch, so the C++ component matches.
+#
+# What it adds:
+# - Every 1 s, the driver reads the ring back from the chip and logs a WARN
+#   "LED check: MISMATCH" with the sent and the read frame. It also logs the
+#   chip's LED_EFFECT register once, and a WARN when that changes.
+# - "Debug LED Refresh": how often an unchanged frame is sent again. 1000 ms is
+#   the release value. 50 ms sends every animation tick, so a fault caused by
+#   writes shows ~20x more often. 600000 ms stops the idle writes in practice.
+# - Switches that stop the read-back and the two fast I2C polls, to see which
+#   traffic the flashes need.
+#
+# After boot, look for "LED check: read-back works" and "LED_EFFECT is N". If
+# they are missing, the chip does not answer the read, and the test is void.
+#
+# Reading the result, with the ring off and idle:
+# - Flash, no MISMATCH: the chip holds the right (dark) frame, so the fault is
+#   between the chip and the LEDs.
+# - MISMATCH: the chip took another frame than the one sent. The read bytes
+#   show what it took.
+# - LED_EFFECT changed: the chip's own effect engine took over the ring.
+# =============================================================================
+
+interval:
+  - interval: 1s
+    id: debug_led_check_interval
+    then:
+      - lambda: id(respeaker).verify_led_ring();
+
+number:
+  - platform: template
+    name: "Debug LED Refresh"
+    id: debug_led_refresh
+    icon: mdi:bug
+    entity_category: config
+    unit_of_measurement: ms
+    mode: box
+    min_value: 50
+    max_value: 600000
+    step: 50
+    initial_value: 1000
+    optimistic: true
+    restore_value: false
+    on_value:
+      - lambda: id(respeaker).set_led_refresh_ms((uint32_t) x);
+
+switch:
+  - platform: template
+    name: "Debug LED Read-back"
+    icon: mdi:bug
+    entity_category: config
+    optimistic: true
+    restore_mode: ALWAYS_ON
+    turn_on_action:
+      - component.resume: debug_led_check_interval
+    turn_off_action:
+      - component.suspend: debug_led_check_interval
+  # Off: no azimuth reads (10 Hz). Beam lock and the beam LED effect stop.
+  - platform: template
+    name: "Debug Beam Poll"
+    icon: mdi:bug
+    entity_category: config
+    optimistic: true
+    restore_mode: ALWAYS_ON
+    turn_on_action:
+      - component.resume: beam_direction
+    turn_off_action:
+      - component.suspend: beam_direction
+  # Off: no Mute button reads (20 Hz). The hardware mute still works; the
+  # factory reset hold and the Improv authorization do not.
+  - platform: template
+    name: "Debug Mute Button Poll"
+    icon: mdi:bug
+    entity_category: config
+    optimistic: true
+    restore_mode: ALWAYS_ON
+    turn_on_action:
+      - component.resume: mute_button
+    turn_off_action:
+      - component.suspend: mute_button

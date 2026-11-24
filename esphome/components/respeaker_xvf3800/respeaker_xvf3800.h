@@ -40,6 +40,9 @@ const uint8_t GPO_SERVICER_RESID_GPO_WRITE_VALUE = 1;
 // which 1.0.8 gave to DOA_VALUE. Seeed I2S firmware changelog, v1.0.8.
 const uint8_t GPO_SERVICER_RESID_LED_RING_VALUE = 19;
 const uint8_t GPO_SERVICER_RESID_LED_RING_VALUE_PRE_1_0_8 = 18;
+// LED_EFFECT (uint8, rw): 0 off, 1 breath, 2 rainbow, 3 single color, 4 doa, 5 ring.
+// Source: xvf_host.py of respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY.
+const uint8_t GPO_SERVICER_RESID_LED_EFFECT = 12;
 const uint8_t GPO_GPO_READ_NUM_BYTES = 5;
 
 // AEC Azimuth constants for LED beam sensor
@@ -272,7 +275,12 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   
   // Individual LED ring control (12 LEDs)
   void set_led_ring(uint32_t *rgb_array);
-  
+  // Debug (issue #115): how often an unchanged frame is sent again.
+  void set_led_refresh_ms(uint32_t ms) { this->led_refresh_ms_ = ms; }
+  // Debug (issue #115): reads LED_RING_COLOR and LED_EFFECT back from the chip
+  // and logs a warning if the ring holds another frame than the last one sent.
+  void verify_led_ring();
+
   std::string read_dfu_version();
   
   // Read LED beam direction (0-11)
@@ -361,11 +369,13 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
 
   // Last frame written by set_led_ring(), so an unchanged frame skips the bus.
   // A frame can be lost or garbled with no I2C error, so an unchanged frame is
-  // still re-sent every LED_FRAME_REFRESH_MS (issue #115).
+  // still re-sent every led_refresh_ms_ (issue #115).
   uint32_t last_led_frame_[12]{};
   bool led_frame_valid_{false};
   uint32_t led_frame_sent_ms_{0};
-  static constexpr uint32_t LED_FRAME_REFRESH_MS = 1000;
+  uint32_t led_refresh_ms_{1000};
+  int led_effect_last_{-1};  // last LED_EFFECT read by verify_led_ring(), -1 = none
+  uint8_t led_ring_cmd_();
 
   // The chip resets these on power-up; they are (re)applied after boot.
   bool asr_route_{false};
