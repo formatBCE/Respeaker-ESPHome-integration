@@ -37,6 +37,7 @@ esphome:
       then:
         - lambda: |-
             id(respeaker).set_led_verify_each_write(id(debug_verify_each_write).state);
+            id(respeaker).set_led_quiet_ms((uint32_t) id(debug_led_quiet).state);
             if (!id(debug_readback).state) id(debug_led_check_interval).stop_poller();
             if (!id(debug_beam_poll).state) id(beam_direction).stop_poller();
             if (!id(debug_mute_button_poll).state) id(mute_button).stop_poller();
@@ -51,6 +52,24 @@ interval:
       - lambda: id(respeaker).verify_led_ring();
 
 number:
+  # The quiet window after each LED write, in which the polls wait instead of
+  # reading (issue #115). 0 turns it off. The release value is 20 ms. Keep it
+  # below 50 ms, the animation frame time, or the polls wait for long.
+  - platform: template
+    name: "Debug LED Quiet Window"
+    id: debug_led_quiet
+    icon: mdi:bug
+    entity_category: config
+    unit_of_measurement: ms
+    mode: box
+    min_value: 0
+    max_value: 45
+    step: 5
+    initial_value: 20
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(respeaker).set_led_quiet_ms((uint32_t) x);
   - platform: template
     name: "Debug LED Refresh"
     id: debug_led_refresh
@@ -70,8 +89,10 @@ number:
 switch:
   # On: read the ring back after every write. An animation sends a frame every
   # 50 ms, so a bad frame lives 50 ms and the 1 s check almost never sees it.
-  # This doubles the LED bus traffic. "stale" in the summary counts reads that
-  # still showed the frame before the last one: the chip applies it later.
+  # This doubles the LED bus traffic, and the read right after each write
+  # ignores the quiet window. Keep it off for normal use. "stale" in the
+  # summary counts reads that still showed the frame before the last one: the
+  # chip applies it later.
   - platform: template
     name: "Debug LED Verify Every Write"
     id: debug_verify_each_write
@@ -95,6 +116,8 @@ switch:
     turn_off_action:
       - component.suspend: debug_led_check_interval
   # Off: no azimuth reads (10 Hz). Beam lock and the beam LED effect stop.
+  # control_leds starts and stops this poll on every phase change, so this
+  # switch holds only until the next phase change.
   - platform: template
     name: "Debug Beam Poll"
     id: debug_beam_poll

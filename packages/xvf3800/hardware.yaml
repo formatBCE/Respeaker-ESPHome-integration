@@ -134,14 +134,17 @@ respeaker_xvf3800:
     # One non-blocking read per poll. The DSP answers CTRL_WAIT during silence;
     # the next poll is the retry, so keep this fast enough to track a speaker.
     # This poll is also the azimuth source for beam lock. Set update_interval to
-    # never, and the Beam lock switch stops working.
+    # never, and the Beam lock switch stops working. control_leds in leds.yaml
+    # stops it while thinking and replying (issue #115).
     update_interval: 100ms
   # The DSP mutes the microphones on a press by itself. The ESP reads the button
   # only for the factory reset hold and for Improv BLE authorization.
+  # 200 ms is enough for both. Every read near an LED write can corrupt the
+  # ring colours (issue #115), so do not poll faster.
   mute_button:
     id: mute_button
     internal: true
-    update_interval: 50ms
+    update_interval: 200ms
     on_release:
       - if:
           condition:

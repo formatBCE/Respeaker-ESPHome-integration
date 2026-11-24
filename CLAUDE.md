@@ -259,7 +259,8 @@ captures the current azimuth, writes it to the fixed-beam registers, enables fix
 follow slot 0. `packages/xvf3800/voice-assistant.yaml` calls `lock_beam()` from the core's `wake_word_start_hook` (if
 the `Beam lock` switch is on) and `unlock_beam()` on STT VAD end and when the pipeline ends. `get_azimuth_degrees()`
 returns the cached azimuth with no bus access; the hook publishes it once per wake word to the disabled-by-default
-`voice_direction` sensor. Never stream it from the 10 Hz poll.
+`voice_direction` sensor. Never stream it from the 10 Hz poll. `control_leds` in `packages/xvf3800/leds.yaml` runs
+that poll only at idle, waiting and listening: a DSP read near an LED write can corrupt the ring colors (issue #115).
 
 ### XVF3800: DFU firmware update
 
@@ -276,13 +277,15 @@ update the levels in `AIC3104::apply_output_gain_()`.
 The ring is 12 RGB LEDs written as one 12-entry `uint32_t` array through `set_led_ring()`. All animation is YAML in
 `packages/xvf3800/leds.yaml`: a 50 ms `interval` dispatches on the `current_led_effect` global to one of the
 `update_*_effect` scripts. `set_led_ring()` uses cmd 19 from XMOS firmware 1.0.8 on, cmd 18 before.
+For 20 ms after each LED write the polls wait (`led_quiet_remaining_ms()`) instead of reading, because a read while
+the DSP drives the ring can corrupt the colors on the LEDs (issue #115). A new poll must do the same.
 
 The `LED Ring` light (`platform: rgb`) does not write the LEDs; it drives the animation engine. Its three template
 outputs are stubs on purpose. The light's `on_state` is the **single writer** of the `user_led_ring_*`, `user_idle_effect`,
 and `user_idle_speed` globals; the preset select and the `set_led_color` action call `id(led_ring_light).make_call()`. The
 light owns the idle branch of `control_leds` only. A light change sets `led_force_update` to demand a repaint.
 
-The DSP keeps its built-in mute action. `MuteButtonBinarySensor` (`mute_button`, 50 ms poll) only reads the button
+The DSP keeps its built-in mute action. `MuteButtonBinarySensor` (`mute_button`, 200 ms poll) only reads the button
 (`GPI_VALUE_ALL`, resid 36, cmd 6, bit 0, low while pressed on firmware 1.0.9). `packages/xvf3800/hardware.yaml` uses it
 for the Voice PE factory reset hold. Do not set `MUTE_FUNCTION_ENABLE` to 0: the hardware mute must keep working when
 the ESP misbehaves.

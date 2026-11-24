@@ -275,6 +275,12 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   
   // Individual LED ring control (12 LEDs)
   void set_led_ring(uint32_t *rgb_array);
+  // Time left in the quiet window after the last LED write, 0 outside it.
+  // A read that reaches the DSP while it drives the ring can corrupt the colours
+  // on the LEDs; the frame stored in the DSP stays correct (issue #115). The
+  // polls wait this long instead of reading.
+  uint32_t led_quiet_remaining_ms() const;
+  void set_led_quiet_ms(uint32_t ms) { this->led_quiet_ms_ = ms; }
   // Debug (issue #115): how often an unchanged frame is sent again.
   void set_led_refresh_ms(uint32_t ms) { this->led_refresh_ms_ = ms; }
   // Debug (issue #115): read the ring back after every write, not once a second.
@@ -376,6 +382,10 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   bool led_frame_valid_{false};
   uint32_t led_frame_sent_ms_{0};
   uint32_t led_refresh_ms_{1000};
+  // Any LED write attempt, also a failed one, starts the quiet window. The
+  // animations write every 50 ms, so 20 ms leaves the polls a 30 ms gap.
+  uint32_t led_write_ms_{0};
+  uint32_t led_quiet_ms_{20};
   int led_effect_last_{-1};  // last LED_EFFECT read by verify_led_ring(), -1 = none
   // Debug (issue #115): read-back state.
   uint32_t prev_led_frame_[12]{};
