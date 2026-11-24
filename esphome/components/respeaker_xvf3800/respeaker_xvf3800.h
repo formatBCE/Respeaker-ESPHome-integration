@@ -259,6 +259,13 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   }
 
   void start_dfu_update();
+  // True while a DFU transfer or its verification runs. can_proceed() keeps the
+  // polls and the LED writes off the bus during the boot update only; after
+  // boot (the flash action) they must check this themselves.
+  bool is_updating() const {
+    return this->dfu_update_status_ == UPDATE_IN_PROGRESS || this->dfu_update_status_ == UPDATE_REBOOT_PENDING ||
+           this->dfu_update_status_ == UPDATE_VERIFY_NEW_VERSION;
+  }
   uint8_t read_vnr();
 
   // Public methods for child components

@@ -386,6 +386,18 @@ If the value is `Update failed`, restart the device. The component then tries
 the update again. If the value stays `Update failed`, or if the value is
 `No response`, flash the DSP firmware over USB.
 
+### Flash the DSP firmware again
+
+Seeed has two I2S builds with the same version number. The device needs the
+master build. With the slave build, the DSP sends no I2S clock. The
+**DSP Status** sensor shows `OK`, but the wake word does not work. The log shows
+`Partial DMA write (0 of ... bytes)` when the speaker plays a sound.
+
+1. In Home Assistant, enable the **Reflash DSP firmware** entity of the device.
+2. CAUTION: Do not remove the power during the update.
+   Press **Reflash DSP firmware**.
+3. Wait until the device log shows `Update complete`.
+
 ### Flash the DSP firmware over USB
 
 Some older boards have the Seeed USB firmware. This firmware has no I2S audio
