@@ -20,9 +20,8 @@
 # =============================================================================
 
 substitutions:
-  # On this branch the components, the sounds, and the XMOS firmware come from
-  # the branch itself.
-  respeaker_lite_ref: voice_incubator
+  # respeaker_lite_ref (the release of this repository) comes from
+  # packages/core/base.yaml. It also selects the incubator_timer component.
   # OHF-Voice/firmware-voice-incubator commit of the voice_incubator component:
   # "Replies at 48 kHz (protocol 3)".
   voice_incubator_ref: 3db3ccd39d57f738543708b3da06321cf48a836d

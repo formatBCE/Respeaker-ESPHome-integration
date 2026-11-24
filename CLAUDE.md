@@ -83,14 +83,16 @@ binaries, so it also proves that all URLs and the MD5 checksums are correct.
   and the 3D print files of one device (`lite`, `xvf3800`, `koala`).
 - `site/index.html` — the device list page at the root of the GitHub Pages site.
 
-## The voice_incubator branch
+## Voice Incubator firmware
 
-On the `voice_incubator` branch, the devices are satellites of the Voice Incubator app (OHF-Voice/firmware-voice-incubator).
-The `voice_incubator` component replaces `voice_assistant` and `micro_wake_word`. The app keeps the wake words, the
-timers and the alarms. Users select it with `respeaker_lite_ref: voice_incubator`.
+A second firmware makes each device a satellite of the Voice Incubator app (OHF-Voice/firmware-voice-incubator). The
+`voice_incubator` component replaces `voice_assistant` and `micro_wake_word`. The app keeps the wake words, the timers
+and the alarms. Its common files sit next to the main ones: `config/common/respeaker-satellite-incubator-base.yaml`,
+`respeaker-xvf-satellite-incubator-base.yaml`, `koala-incubator-base.yaml`. A user config selects it with that file in
+`files:`. The release workflow does not build it yet.
 
-The three `config/common/*-base.yaml` files keep `core/base.yaml`, the hardware packages, and the device packages of
-`main` unchanged. The incubator packages replace the rest:
+The incubator common files keep `core/base.yaml`, the hardware packages and the device packages unchanged. The
+incubator packages replace the rest:
 
 - `incubator/voice.yaml` replaces `core/voice-assistant.yaml` and `core/timers-alarm.yaml`. It feeds the device
   packages the state that they read: `voice_assistant_phase` (from the app's events), the `timer_ringing` switch, and
@@ -102,8 +104,8 @@ The three `config/common/*-base.yaml` files keep `core/base.yaml`, the hardware 
   copies its channel count from the mixer input, and that exists only after the mixer is validated.
 - `incubator/xvf3800.yaml` replaces `xvf3800/voice-assistant.yaml` and `xvf3800/timers-alarm.yaml`.
 
-When `main` changes `core/controls.yaml`, `core/media-player.yaml` or `core/voice-assistant.yaml`, port the change to
-the incubator copy by hand.
+When you change `core/controls.yaml`, `core/media-player.yaml` or `core/voice-assistant.yaml`, port the change to the
+incubator copy.
 
 ## Important: the source of truth is GitHub, not the working tree
 

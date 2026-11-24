@@ -1,24 +1,18 @@
 # =============================================================================
-# Koala Satellite — all packages (Voice Incubator branch)
+# Koala Satellite — all packages
 #
-# On this branch the satellite is a Voice Incubator satellite. The incubator
-# packages replace the voice assistant, the timers and alarm, the media player
-# and the controls of the core. The device packages are the same as on main.
-# User configurations select it with respeaker_lite_ref: voice_incubator.
+# The voice satellite core and the ReSpeaker Lite hardware, then the Koala
+# device package, which adds the Koala hardware. The factory firmware and the
+# dashboard configuration both include this file.
 #
 # The order is important: a later package overrides a value of an earlier one.
-# call-speaker.yaml comes after the hardware package.
 # =============================================================================
-
-substitutions:
-  # What the device tells the Voice Incubator app it is.
-  incubator_model: koala
 
 packages:
   core_base: !include ../../packages/core/base.yaml
-  incubator_voice: !include ../../packages/incubator/voice.yaml
-  incubator_media_player: !include ../../packages/incubator/media-player.yaml
-  incubator_controls: !include ../../packages/incubator/controls.yaml
+  core_voice_assistant: !include ../../packages/core/voice-assistant.yaml
+  core_media_player: !include ../../packages/core/media-player.yaml
+  core_timers_alarm: !include ../../packages/core/timers-alarm.yaml
+  core_controls: !include ../../packages/core/controls.yaml
   respeaker_lite_hardware: !include ../../packages/respeaker-lite/hardware.yaml
-  incubator_call_speaker: !include ../../packages/incubator/call-speaker.yaml
   koala_device: !include ../../packages/koala/device.yaml

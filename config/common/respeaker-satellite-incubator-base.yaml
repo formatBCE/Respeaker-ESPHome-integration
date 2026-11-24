@@ -1,0 +1,30 @@
+# =============================================================================
+# Respeaker Lite satellite — all packages, Voice Incubator firmware
+#
+# The satellite of the Voice Incubator app
+# (https://github.com/OHF-Voice/app-voice-incubator). The hardware and device
+# packages are the same as in respeaker-satellite-base.yaml. The incubator
+# packages replace the voice assistant, the timers and the alarm, the media
+# player, and the controls of the core. The app keeps the wake words, the
+# timers and the alarms.
+#
+# The order is important: a later package overrides a value of an earlier one.
+# call-speaker.yaml comes after the hardware package.
+# =============================================================================
+
+substitutions:
+  # What the device tells the Voice Incubator app it is.
+  incubator_model: respeaker-lite
+
+esphome:
+  project:
+    name: formatbce.Respeaker Lite Incubator
+
+packages:
+  core_base: !include ../../packages/core/base.yaml
+  incubator_voice: !include ../../packages/incubator/voice.yaml
+  incubator_media_player: !include ../../packages/incubator/media-player.yaml
+  incubator_controls: !include ../../packages/incubator/controls.yaml
+  respeaker_lite_hardware: !include ../../packages/respeaker-lite/hardware.yaml
+  incubator_call_speaker: !include ../../packages/incubator/call-speaker.yaml
+  lite_device: !include ../../packages/lite/device.yaml
