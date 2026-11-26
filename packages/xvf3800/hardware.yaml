@@ -210,6 +210,18 @@ text_sensor:
     icon: "mdi:chip"
     update_interval: never
 
+button:
+  # Flashes the embedded DSP firmware even when the versions match. Seeed ships
+  # an I2S slave build with the same version (1.0.9). With it, nothing drives
+  # the I2S clocks: no wake word, and every speaker write is 0 bytes (issue #118).
+  - platform: template
+    name: "Reflash DSP firmware"
+    entity_category: diagnostic
+    disabled_by_default: true
+    icon: "mdi:chip"
+    on_press:
+      - respeaker_xvf3800.flash:
+
 audio_dac:
   - platform: aic3104
     id: aic3104_dac

@@ -272,6 +272,17 @@ or the component fails; on a mismatch `setup()` starts the update itself (`start
 firmware, update the binary, the `version`, and the `md5` together. Then read the four output level registers again and
 update the levels in `AIC3104::apply_output_gain_()`.
 
+The version check cannot see the I2S role. Seeed ships `i2s_master_v1.0.9_48k` (the one we embed) and
+`i2s_slave_v1.0.9_16k`, and both report 1.0.9. A chip with the slave build is never updated. Nothing drives the I2S
+clocks, so the wake word never fires and every speaker write logs `Partial DMA write (0 of ... bytes)`. I2C still
+works, so the LEDs, mute and `DSP Status: OK` look normal (issue #118). The fix is the `Reflash DSP firmware` button
+in `packages/xvf3800/hardware.yaml`, which calls `respeaker_xvf3800.flash` without a version check. No control command
+reports the I2S role, and we do not detect the slave build automatically on purpose.
+
+After boot, `can_proceed()` does not keep other code off the bus during that flash. Every poll and every LED write
+returns early while `is_updating()` is true. A new poll must do the same. A second `start_dfu_update()` during an
+update does nothing.
+
 ### XVF3800: LED ring and mute button
 
 The ring is 12 RGB LEDs written as one 12-entry `uint32_t` array through `set_led_ring()`. All animation is YAML in

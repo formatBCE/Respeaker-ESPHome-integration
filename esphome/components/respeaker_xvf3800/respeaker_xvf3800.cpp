@@ -99,6 +99,10 @@ uint8_t RespeakerXVF3800::read_vnr() {
 }
 
 void RespeakerXVF3800::start_dfu_update() {
+  if (this->is_updating()) {
+    ESP_LOGW(TAG, "Update already running");
+    return;
+  }
   if (this->firmware_bin_ == nullptr || !this->firmware_bin_length_) {
     ESP_LOGE(TAG, "Firmware invalid");
     return;
@@ -571,6 +575,9 @@ void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
   // The YAML animation interval calls this 20 times a second whether the frame
   // changed or not. Skip the bus when it did not, but re-send it now and then:
   // a dropped or garbled frame would otherwise stay on the ring for good.
+  if (this->is_updating()) {
+    return;
+  }
   const uint32_t now = millis();
   if (this->led_frame_valid_ && now - this->led_frame_sent_ms_ < LED_FRAME_REFRESH_MS &&
       memcmp(this->last_led_frame_, rgb_array, sizeof(this->last_led_frame_)) == 0) {
@@ -691,6 +698,9 @@ void MuteSwitch::update() {
     ESP_LOGW(TAG, "MuteSwitch parent not set");
     return;
   }
+  if (this->parent_->is_updating()) {
+    return;
+  }
   // Issue #115: never read while the DSP drives the LED ring. Run once the
   // quiet window is over instead; the fixed name keeps one pending retry.
   if (const uint32_t wait = this->parent_->led_quiet_remaining_ms(); wait > 0) {
@@ -735,13 +745,16 @@ void DFUVersionTextSensor::update() {
     ESP_LOGW(TAG, "DFUVersionTextSensor parent not set");
     return;
   }
+  if (this->parent_->is_updating()) {
+    return;
+  }
   // Issue #115: never read while the DSP drives the LED ring. Run once the
   // quiet window is over instead; the fixed name keeps one pending retry.
   if (const uint32_t wait = this->parent_->led_quiet_remaining_ms(); wait > 0) {
     this->set_timeout("led_quiet", wait, [this]() { this->update(); });
     return;
   }
-  
+
   std::string version = this->parent_->read_dfu_version();
   if (this->get_raw_state() != version) {
     this->publish_state(version);
@@ -762,13 +775,16 @@ void LEDBeamSensor::update() {
     ESP_LOGW(TAG, "LEDBeamSensor parent not set");
     return;
   }
+  if (this->parent_->is_updating()) {
+    return;
+  }
   // Issue #115: never read while the DSP drives the LED ring. Run once the
   // quiet window is over instead; the fixed name keeps one pending retry.
   if (const uint32_t wait = this->parent_->led_quiet_remaining_ms(); wait > 0) {
     this->set_timeout("led_quiet", wait, [this]() { this->update(); });
     return;
   }
-  
+
   int led_index = this->parent_->read_led_beam_direction();
   if (led_index >= 0 && led_index <= 11) {
     if (!this->has_state() || this->get_raw_state() != led_index) {
@@ -786,7 +802,7 @@ void MuteButtonBinarySensor::dump_config() {
 }
 
 void MuteButtonBinarySensor::update() {
-  if (this->parent_ == nullptr || this->parent_->is_failed()) {
+  if (this->parent_ == nullptr || this->parent_->is_failed() || this->parent_->is_updating()) {
     return;
   }
   // Issue #115: never read while the DSP drives the LED ring. Run once the
