@@ -40,9 +40,6 @@ const uint8_t GPO_SERVICER_RESID_GPO_WRITE_VALUE = 1;
 // which 1.0.8 gave to DOA_VALUE. Seeed I2S firmware changelog, v1.0.8.
 const uint8_t GPO_SERVICER_RESID_LED_RING_VALUE = 19;
 const uint8_t GPO_SERVICER_RESID_LED_RING_VALUE_PRE_1_0_8 = 18;
-// LED_EFFECT (uint8, rw): 0 off, 1 breath, 2 rainbow, 3 single color, 4 doa, 5 ring.
-// Source: xvf_host.py of respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY.
-const uint8_t GPO_SERVICER_RESID_LED_EFFECT = 12;
 const uint8_t GPO_GPO_READ_NUM_BYTES = 5;
 
 // AEC Azimuth constants for LED beam sensor
@@ -275,19 +272,12 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
   
   // Individual LED ring control (12 LEDs)
   void set_led_ring(uint32_t *rgb_array);
+  
   // Time left in the quiet window after the last LED write, 0 outside it.
   // A read that reaches the DSP while it drives the ring can corrupt the colours
   // on the LEDs; the frame stored in the DSP stays correct (issue #115). The
   // polls wait this long instead of reading.
   uint32_t led_quiet_remaining_ms() const;
-  void set_led_quiet_ms(uint32_t ms) { this->led_quiet_ms_ = ms; }
-  // Debug (issue #115): how often an unchanged frame is sent again.
-  void set_led_refresh_ms(uint32_t ms) { this->led_refresh_ms_ = ms; }
-  // Debug (issue #115): read the ring back after every write, not once a second.
-  void set_led_verify_each_write(bool on) { this->led_verify_each_write_ = on; }
-  // Debug (issue #115): reads LED_RING_COLOR and LED_EFFECT back from the chip
-  // and logs a warning if the ring holds another frame than the last one sent.
-  void verify_led_ring();
 
   std::string read_dfu_version();
   
@@ -377,25 +367,15 @@ class RespeakerXVF3800 : public i2c::I2CDevice, public Component {
 
   // Last frame written by set_led_ring(), so an unchanged frame skips the bus.
   // A frame can be lost or garbled with no I2C error, so an unchanged frame is
-  // still re-sent every led_refresh_ms_ (issue #115).
+  // still re-sent every LED_FRAME_REFRESH_MS (issue #115).
   uint32_t last_led_frame_[12]{};
   bool led_frame_valid_{false};
   uint32_t led_frame_sent_ms_{0};
-  uint32_t led_refresh_ms_{1000};
+  static constexpr uint32_t LED_FRAME_REFRESH_MS = 1000;
   // Any LED write attempt, also a failed one, starts the quiet window. The
   // animations write every 50 ms, so 20 ms leaves the polls a 30 ms gap.
   uint32_t led_write_ms_{0};
-  uint32_t led_quiet_ms_{20};
-  int led_effect_last_{-1};  // last LED_EFFECT read by verify_led_ring(), -1 = none
-  // Debug (issue #115): read-back state.
-  uint32_t prev_led_frame_[12]{};
-  bool led_verify_each_write_{false};
-  uint32_t led_checks_{0};
-  uint32_t led_mismatches_{0};
-  uint32_t led_stale_{0};
-  uint32_t led_check_summary_ms_{0};
-  uint8_t led_ring_cmd_();
-  void check_led_frame_();
+  static constexpr uint32_t LED_QUIET_MS = 20;
 
   // The chip resets these on power-up; they are (re)applied after boot.
   bool asr_route_{false};

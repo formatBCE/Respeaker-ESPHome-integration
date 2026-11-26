@@ -572,7 +572,7 @@ void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
   // changed or not. Skip the bus when it did not, but re-send it now and then:
   // a dropped or garbled frame would otherwise stay on the ring for good.
   const uint32_t now = millis();
-  if (this->led_frame_valid_ && now - this->led_frame_sent_ms_ < this->led_refresh_ms_ &&
+  if (this->led_frame_valid_ && now - this->led_frame_sent_ms_ < LED_FRAME_REFRESH_MS &&
       memcmp(this->last_led_frame_, rgb_array, sizeof(this->last_led_frame_)) == 0) {
     return;
   }
@@ -587,111 +587,20 @@ void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
     payload[i * 4 + 3] = 0x00;
   }
   
+  const uint8_t cmd = this->chip_version_at_least_(1, 0, 8) ? GPO_SERVICER_RESID_LED_RING_VALUE
+                                                            : GPO_SERVICER_RESID_LED_RING_VALUE_PRE_1_0_8;
   // Cache only a frame that reached the chip, so a failed one is sent again.
-  this->led_frame_valid_ = this->xmos_write_bytes(GPO_SERVICER_RESID, this->led_ring_cmd_(), payload, 48);
+  this->led_frame_valid_ = this->xmos_write_bytes(GPO_SERVICER_RESID, cmd, payload, 48);
   this->led_write_ms_ = millis();
   if (this->led_frame_valid_) {
-    memcpy(this->prev_led_frame_, this->last_led_frame_, sizeof(this->prev_led_frame_));
     memcpy(this->last_led_frame_, rgb_array, sizeof(this->last_led_frame_));
     this->led_frame_sent_ms_ = now;
-    if (this->led_verify_each_write_) {
-      this->check_led_frame_();
-    }
   }
 }
 
 uint32_t RespeakerXVF3800::led_quiet_remaining_ms() const {
   const uint32_t elapsed = millis() - this->led_write_ms_;
-  return elapsed < this->led_quiet_ms_ ? this->led_quiet_ms_ - elapsed : 0;
-}
-
-uint8_t RespeakerXVF3800::led_ring_cmd_() {
-  return this->chip_version_at_least_(1, 0, 8) ? GPO_SERVICER_RESID_LED_RING_VALUE
-                                               : GPO_SERVICER_RESID_LED_RING_VALUE_PRE_1_0_8;
-}
-
-void RespeakerXVF3800::verify_led_ring() {
-  // Debug read-back obeys the quiet window too; it just skips this second.
-  if (this->led_quiet_remaining_ms() > 0) {
-    return;
-  }
-  // LED_EFFECT: the chip's own effect engine. Log the first value and every change.
-  const uint8_t effect_req[] = {GPO_SERVICER_RESID, GPO_SERVICER_RESID_LED_EFFECT | 0x80, 2};
-  uint8_t effect_resp[2];
-  if (this->write_read(effect_req, sizeof(effect_req), effect_resp, sizeof(effect_resp)) == i2c::ERROR_OK &&
-      effect_resp[0] == CTRL_DONE && effect_resp[1] != this->led_effect_last_) {
-    if (this->led_effect_last_ < 0) {
-      ESP_LOGI(TAG, "LED check: LED_EFFECT is %u", effect_resp[1]);
-    } else {
-      ESP_LOGW(TAG, "LED check: LED_EFFECT changed from %d to %u", this->led_effect_last_, effect_resp[1]);
-    }
-    this->led_effect_last_ = effect_resp[1];
-  }
-
-  // With the per-write check on, the ring is already checked after every write.
-  if (!this->led_verify_each_write_) {
-    this->check_led_frame_();
-  }
-
-  // A summary every minute proves that the read-back works, also to a log
-  // viewer that connected after boot. Without it, no MISMATCH means nothing.
-  const uint32_t now = millis();
-  if (now - this->led_check_summary_ms_ >= 60000) {
-    this->led_check_summary_ms_ = now;
-    ESP_LOGI(TAG, "LED check: %" PRIu32 " read-backs, %" PRIu32 " mismatches, %" PRIu32 " stale, LED_EFFECT %d",
-             this->led_checks_, this->led_mismatches_, this->led_stale_, this->led_effect_last_);
-  }
-}
-
-void RespeakerXVF3800::check_led_frame_() {
-  // Nothing to compare with before the first frame that reached the chip.
-  if (!this->led_frame_valid_) {
-    return;
-  }
-
-  const uint8_t ring_req[] = {GPO_SERVICER_RESID, (uint8_t) (this->led_ring_cmd_() | 0x80), 49};
-  uint8_t ring_resp[49];  // status byte, then 12 little-endian uint32
-  const i2c::ErrorCode err = this->write_read(ring_req, sizeof(ring_req), ring_resp, sizeof(ring_resp));
-  if (err != i2c::ERROR_OK) {
-    ESP_LOGW(TAG, "LED check: read failed, error=%d", (int) err);
-    return;
-  }
-  if (ring_resp[0] != CTRL_DONE) {
-    ESP_LOGD(TAG, "LED check: read returned status 0x%02X", ring_resp[0]);
-    return;
-  }
-
-  // Compare the colour bytes only. Byte 3 of each entry is logged, not compared.
-  bool match = true;
-  bool stale = true;  // the chip still holds the frame before the last one
-  uint32_t read[12];
-  for (int i = 0; i < 12; i++) {
-    memcpy(&read[i], &ring_resp[1 + i * 4], sizeof(uint32_t));
-    match &= (read[i] & 0xFFFFFF) == (this->last_led_frame_[i] & 0xFFFFFF);
-    stale &= (read[i] & 0xFFFFFF) == (this->prev_led_frame_[i] & 0xFFFFFF);
-  }
-  this->led_checks_++;
-  if (match) {
-    ESP_LOGV(TAG, "LED check: ring matches the last frame");
-    return;
-  }
-  // The chip may apply a frame after it answers the write. Count that, but do
-  // not flood the log with it.
-  if (stale) {
-    this->led_stale_++;
-    return;
-  }
-  this->led_mismatches_++;
-
-  char sent_hex[12 * 9 + 1];
-  char read_hex[12 * 9 + 1];
-  for (int i = 0; i < 12; i++) {
-    snprintf(&sent_hex[i * 9], 10, "%08" PRIX32 " ", this->last_led_frame_[i]);
-    snprintf(&read_hex[i * 9], 10, "%08" PRIX32 " ", read[i]);
-  }
-  ESP_LOGW(TAG, "LED check: MISMATCH %" PRIu32 " ms after the last write", millis() - this->led_frame_sent_ms_);
-  ESP_LOGW(TAG, "LED check: sent %s", sent_hex);
-  ESP_LOGW(TAG, "LED check: read %s", read_hex);
+  return elapsed < LED_QUIET_MS ? LED_QUIET_MS - elapsed : 0;
 }
 
 std::string RespeakerXVF3800::read_dfu_version() {
