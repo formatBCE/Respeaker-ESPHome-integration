@@ -32,10 +32,25 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
+    # Without Beam lock, control_leds stops the beam poll at idle (issue #115).
+    # Run it again so the poll follows the switch. Boot runs it after init.
+    on_turn_on:
+      - if:
+          condition:
+            lambda: return !id(init_in_progress);
+          then:
+            - script.execute: control_leds
+    on_turn_off:
+      - if:
+          condition:
+            lambda: return !id(init_in_progress);
+          then:
+            - script.execute: control_leds
 
 sensor:
   # Voice Direction. The direction of the wake word in degrees, published once
   # per wake word by wake_word_start_hook, never from the 10 Hz beam poll.
+  # It needs Beam lock on: without it, the beam poll stops at idle (#115).
   # force_update gives one state per wake word, also for an unchanged direction.
   - platform: template
     id: voice_direction

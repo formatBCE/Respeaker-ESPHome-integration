@@ -195,9 +195,9 @@ numbers come from the `substitutions:` block of `packages/core/base.yaml`.
 timeout in a script: a `delay` inside `on_turn_on` keeps running after turn-off (ESPHome runs re-triggered automation
 delays in parallel) and cuts a later ring short.
 
-A template switch runs `on_turn_on` and `on_turn_off` before it publishes the new state. So in those triggers,
-`id(timer_ringing).state` still has the old value. Give the new state to a script as a parameter, as the calls of
-`apply_wake_word_sensitivity` do.
+A template switch runs `turn_on_action` and `turn_off_action` before it publishes the new state. In those actions,
+`.state` still has the old value. `on_turn_on` and `on_turn_off` run after the publish (`Switch::publish_state`), so
+in those triggers `.state` has the new value.
 
 "Snooze" is handled in the ringing branch of `on_wake_word_detected`, matched by the model's `wake_word` string.
 `snooze_ring` stores an epoch deadline in the restored `snooze_until` global (0 = none) and turns the ring off. A 1 s
@@ -260,7 +260,9 @@ follow slot 0. `packages/xvf3800/voice-assistant.yaml` calls `lock_beam()` from 
 the `Beam lock` switch is on) and `unlock_beam()` on STT VAD end and when the pipeline ends. `get_azimuth_degrees()`
 returns the cached azimuth with no bus access; the hook publishes it once per wake word to the disabled-by-default
 `voice_direction` sensor. Never stream it from the 10 Hz poll. `control_leds` in `packages/xvf3800/leds.yaml` runs
-that poll only at idle, waiting and listening: a DSP read near an LED write can corrupt the ring colors (issue #115).
+that poll only at waiting and listening, and at idle only if `Beam lock` is on: a DSP read near an LED write can
+corrupt the ring colors (issue #115). So `voice_direction` gets a value only with `Beam lock` on. The `Beam lock`
+switch runs `control_leds`, so the poll follows the switch.
 
 ### XVF3800: DFU firmware update
 
