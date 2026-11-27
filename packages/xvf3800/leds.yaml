@@ -535,11 +535,12 @@ script:
 
           // Issue #115: a DSP read near an LED write can corrupt the ring
           // colours. Thinking, replying, error and not-ready run the fast
-          // animations and do not use the beam, so the beam poll runs only at
-          // idle (azimuth for beam lock and Voice Direction) and while waiting
-          // or listening (the beam effect). Every phase change runs this script.
+          // animations and do not use the beam, so the beam poll runs only
+          // while waiting or listening (the beam effect), and at idle only if
+          // Beam lock is on: the wake word azimuth for the lock and Voice
+          // Direction. Every phase change and the Beam lock switch run this.
           static int last_beam_poll = -1;
-          const bool beam_poll = voice_phase == ${voice_assist_idle_phase_id} ||
+          const bool beam_poll = (voice_phase == ${voice_assist_idle_phase_id} && id(beam_lock_enabled).state) ||
                                  voice_phase == ${voice_assist_waiting_for_command_phase_id} ||
                                  voice_phase == ${voice_assist_listening_for_command_phase_id};
           if (beam_poll != last_beam_poll) {

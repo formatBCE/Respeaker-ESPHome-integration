@@ -606,14 +606,16 @@ the end of the pipeline. So the ring stays on the speaker during one utterance.
 
 The **Beam lock** switch turns this behaviour on and off. Beam lock reads the
 direction from the `led_beam_sensor` poll. Keep that poll on, or beam lock has
-no direction to use.
+no direction to use. The device reads the direction at idle only if Beam lock
+is on. Each read can make one LED show a wrong color for a moment (issue #115).
 
 The **Voice Direction** sensor shows the direction of the wake word in degrees,
 from 0 to 360. The device sends one value for each wake word, so the sensor
 does not load the connection. If Beam lock is on, the value is the locked
-direction. The sensor also reads the `led_beam_sensor` poll. Home Assistant
-disables the sensor by default. Enable it to turn a camera or a robot to the
-speaker.
+direction. The sensor also reads the `led_beam_sensor` poll, so it needs
+Beam lock on. Without Beam lock, the sensor usually gets no value. Home
+Assistant disables the sensor by default. Enable it to turn a camera or a
+robot to the speaker.
 
 In your own lambdas, call `id(respeaker).get_azimuth_degrees()`. The call gives
 the same direction and does no I2C read. It gives `NAN` if the poll has no
