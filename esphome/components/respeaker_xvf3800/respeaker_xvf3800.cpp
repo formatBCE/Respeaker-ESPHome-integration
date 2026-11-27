@@ -598,10 +598,16 @@ void RespeakerXVF3800::set_led_ring(uint32_t *rgb_array) {
                                                             : GPO_SERVICER_RESID_LED_RING_VALUE_PRE_1_0_8;
   // Cache only a frame that reached the chip, so a failed one is sent again.
   this->led_frame_valid_ = this->xmos_write_bytes(GPO_SERVICER_RESID, cmd, payload, 48);
+  this->led_write_ms_ = millis();
   if (this->led_frame_valid_) {
     memcpy(this->last_led_frame_, rgb_array, sizeof(this->last_led_frame_));
     this->led_frame_sent_ms_ = now;
   }
+}
+
+uint32_t RespeakerXVF3800::led_quiet_remaining_ms() const {
+  const uint32_t elapsed = millis() - this->led_write_ms_;
+  return elapsed < LED_QUIET_MS ? LED_QUIET_MS - elapsed : 0;
 }
 
 std::string RespeakerXVF3800::read_dfu_version() {
@@ -695,6 +701,12 @@ void MuteSwitch::update() {
   if (this->parent_->is_updating()) {
     return;
   }
+  // Issue #115: never read while the DSP drives the LED ring. Run once the
+  // quiet window is over instead; the fixed name keeps one pending retry.
+  if (const uint32_t wait = this->parent_->led_quiet_remaining_ms(); wait > 0) {
+    this->set_timeout("led_quiet", wait, [this]() { this->update(); });
+    return;
+  }
 
   bool mute_state;
   if (!this->parent_->read_mute_status(mute_state)) {
@@ -736,6 +748,12 @@ void DFUVersionTextSensor::update() {
   if (this->parent_->is_updating()) {
     return;
   }
+  // Issue #115: never read while the DSP drives the LED ring. Run once the
+  // quiet window is over instead; the fixed name keeps one pending retry.
+  if (const uint32_t wait = this->parent_->led_quiet_remaining_ms(); wait > 0) {
+    this->set_timeout("led_quiet", wait, [this]() { this->update(); });
+    return;
+  }
 
   std::string version = this->parent_->read_dfu_version();
   if (this->get_raw_state() != version) {
@@ -760,6 +778,12 @@ void LEDBeamSensor::update() {
   if (this->parent_->is_updating()) {
     return;
   }
+  // Issue #115: never read while the DSP drives the LED ring. Run once the
+  // quiet window is over instead; the fixed name keeps one pending retry.
+  if (const uint32_t wait = this->parent_->led_quiet_remaining_ms(); wait > 0) {
+    this->set_timeout("led_quiet", wait, [this]() { this->update(); });
+    return;
+  }
 
   int led_index = this->parent_->read_led_beam_direction();
   if (led_index >= 0 && led_index <= 11) {
@@ -779,6 +803,12 @@ void MuteButtonBinarySensor::dump_config() {
 
 void MuteButtonBinarySensor::update() {
   if (this->parent_ == nullptr || this->parent_->is_failed() || this->parent_->is_updating()) {
+    return;
+  }
+  // Issue #115: never read while the DSP drives the LED ring. Run once the
+  // quiet window is over instead; the fixed name keeps one pending retry.
+  if (const uint32_t wait = this->parent_->led_quiet_remaining_ms(); wait > 0) {
+    this->set_timeout("led_quiet", wait, [this]() { this->update(); });
     return;
   }
 
